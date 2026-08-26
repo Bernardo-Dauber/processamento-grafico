@@ -1,0 +1,35 @@
+# Build e artefatos do CMake
+build/
+_build/
+_deps/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CMakeUserPresets.json
+
+# Binarios e objetos
+*.o
+*.obj
+*.exe
+*.out
+*.a
+*.lib
+*.dll
+*.so
+
+# Dependencias baixadas pelo CMake
+glfw-src/
+glfw-build/
+external/
+
+# Editores
+.vscode/
+.idea/
+
+# Logs e arquivos de sistema
+*.log
+.DS_Store
+Thumbs.db
+
+# AppImages / binarios baixados
+*.AppImage
