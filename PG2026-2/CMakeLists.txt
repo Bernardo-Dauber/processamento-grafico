@@ -50,6 +50,12 @@ set(EXERCISES
     Exercicios/Lista1/2
     Exercicios/Lista1/3
     Exercicios/Lista1/4
+    Exercicios/Lista2/Ex1
+    Exercicios/Lista2/Ex2
+    Exercicios/Lista2/Ex3
+    Exercicios/Lista2/Ex4
+    Exercicios/Lista2/Ex5
+    Exercicios/Lista2/Ex6
 )
 
 add_compile_options(-Wno-pragmas)
@@ -81,7 +87,9 @@ foreach(EXERCISE ${EXERCISES})
     get_filename_component(EXE_NAME ${EXERCISE} NAME)
 
     # Coleta todos os .cpp dentro do diretório do exercício
-    file(GLOB EXE_SOURCES src/${EXERCISE}/*.cpp)
+    # (CONFIGURE_DEPENDS faz o CMake reavaliar o glob a cada build, evitando
+    # que novos .cpp criados depois da configuração fiquem de fora)
+    file(GLOB EXE_SOURCES CONFIGURE_DEPENDS src/${EXERCISE}/*.cpp)
 
     # Cria o executável com todos os .cpp + glad.c
     add_executable(${EXE_NAME} ${EXE_SOURCES} ${GLAD_C_FILE})
