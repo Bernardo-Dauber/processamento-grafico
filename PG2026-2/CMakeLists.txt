@@ -56,6 +56,7 @@ set(EXERCISES
     Exercicios/Lista2/Ex4
     Exercicios/Lista2/Ex5
     Exercicios/Lista2/Ex6
+    Trabalho/GrauA
 )
 
 add_compile_options(-Wno-pragmas)
@@ -99,4 +100,19 @@ foreach(EXERCISE ${EXERCISES})
 
 
     target_link_libraries(${EXE_NAME} glfw ${OPENGL_LIBS} glm::glm )
+
+    # Projetos com assets: copia config.txt e assets/ para a pasta do
+    # executável, para que ele encontre os recursos rodando de lá
+    if (EXISTS ${CMAKE_SOURCE_DIR}/src/${EXERCISE}/config.txt)
+        add_custom_command(TARGET ${EXE_NAME} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    ${CMAKE_SOURCE_DIR}/src/${EXERCISE}/config.txt
+                    $<TARGET_FILE_DIR:${EXE_NAME}>/config.txt)
+    endif()
+    if (IS_DIRECTORY ${CMAKE_SOURCE_DIR}/src/${EXERCISE}/assets)
+        add_custom_command(TARGET ${EXE_NAME} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                    ${CMAKE_SOURCE_DIR}/src/${EXERCISE}/assets
+                    $<TARGET_FILE_DIR:${EXE_NAME}>/assets)
+    endif()
 endforeach()
