@@ -56,6 +56,7 @@ set(EXERCISES
     Exercicios/Lista2/Ex4
     Exercicios/Lista2/Ex5
     Exercicios/Lista2/Ex6
+    Exercicios/Lista3
     Trabalho/GrauA
 )
 
