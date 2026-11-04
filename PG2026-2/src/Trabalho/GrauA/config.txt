@@ -1,0 +1,91 @@
+# ============================================================
+# Mini-Mario -- Grau A (Processamento Grafico, Unisinos)
+# Arquivo de configuracao da fase
+#
+# Formato:
+#   [secao]         inicio de secao
+#   chave = valor   propriedade (texto ou numeros)
+#   x, y, ...       linha CSV numerica (listas de tamanho variavel)
+#   # comentario
+#
+# Coordenadas no mundo virtual 960x540 (Y cresce para BAIXO).
+# ============================================================
+
+[window]
+title = Mini-Mario -- Grau A
+width = 960
+height = 540
+
+[world]
+width = 2880
+
+# Camadas de fundo (de tras para frente) e seus fatores de parallax:
+# 0.0 = fixa (nao acompanha a camera), 1.0 = acompanha o mundo.
+[parallax]
+layer = assets/sky.png, 0.0
+layer = assets/hills.png, 0.3
+layer = assets/trees.png, 0.6
+
+# Constantes de fisica do jogador
+[physics]
+gravity = 2200
+move_speed = 300
+jump_velocity = 720
+enemy_speed = 60
+
+[player]
+sprite = assets/player.png
+frame_size = 32, 32
+spawn = 60, 460
+
+[enemy]
+sprite = assets/enemy.png
+frame_size = 32, 32
+
+[coin]
+sprite = assets/coin.png
+frame_size = 32, 32
+
+[flag]
+sprite = assets/flag.png
+frame_size = 32, 64
+position = 2750, 444
+
+# Plataformas: x, y, largura, altura
+[platform]
+# chao (3 segmentos com buracos entre eles)
+0, 508, 880, 32
+1000, 508, 900, 32
+2020, 508, 860, 32
+# plataformas flutuantes
+400, 400, 160, 32
+650, 320, 160, 32
+1100, 400, 160, 32
+1400, 330, 160, 32
+1700, 420, 160, 32
+2100, 360, 160, 32
+2400, 430, 160, 32
+
+# Moedas: x, y
+[coins]
+440, 340
+480, 340
+690, 260
+730, 260
+900, 440
+940, 440
+1140, 340
+1180, 340
+1440, 270
+1480, 270
+1740, 360
+1950, 440
+2140, 300
+2180, 300
+2440, 370
+
+# Inimigos: x, y, minX, maxX (limites de patrulha)
+[enemies]
+500, 476, 420, 820
+1300, 476, 1060, 1820
+1740, 388, 1704, 1852
