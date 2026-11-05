@@ -1,0 +1,20 @@
+[project]
+name = "grau-b"
+version = "0.1.0"
+description = "Trabalho Grau B de Processamento Gráfico: processamento de imagem e vídeo com OpenCV"
+readme = "README.md"
+authors = [
+    { name = "Bernardo Dauber", email = "be.daubervieira@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "opencv-python>=5.0.0.93",
+]
+
+[build-system]
+requires = ["uv_build>=0.13.7,<0.14.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-root = ""
+module-name = "grau_b"
