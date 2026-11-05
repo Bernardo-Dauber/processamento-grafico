@@ -33,3 +33,9 @@ Thumbs.db
 
 # AppImages / binarios baixados
 *.AppImage
+
+# Python (projeto GrauB, gerenciado pelo uv)
+.venv/
+__pycache__/
+*.pyc
+.python-version
