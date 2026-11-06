@@ -7,7 +7,14 @@ import numpy as np
 
 from grau_b.canais import CANAL_PADRAO, aplicar_selecao_canal, proximo_canal
 from grau_b.filtros import ID_NENHUM, aplicar_filtro, obter_filtro, proximo_filtro
-from grau_b.io_utils import carregar_imagem, resetar, salvar_frame, salvar_imagem
+from grau_b.io_utils import (
+    ImagemInvalidaError,
+    carregar_imagem,
+    resetar,
+    salvar_frame,
+    salvar_imagem,
+)
+from grau_b.operacoes import aplicar_operacao, obter_operacao, proxima_operacao
 from grau_b.stickers import (
     STICKER_PADRAO,
     aplicar_sticker,
@@ -23,6 +30,8 @@ TECLA_PROXIMO_FILTRO = ord("f")
 TECLA_PROXIMO_CANAL = ord("c")
 TECLA_SEM_FILTRO = ord("n")
 TECLA_PROXIMO_STICKER = ord("t")
+TECLA_SEGUNDA_IMAGEM = ord("o")
+TECLA_PROXIMA_OPERACAO = ord("m")
 TECLAS_SAIR = {ord("q"), 27}  # 27 == ESC
 
 # Tempo (ms) de espera por tecla. Um valor curto mantém a janela responsiva
@@ -42,15 +51,22 @@ def modo_foto(caminho_imagem: str) -> None:
     """Abre a janela do Modo Foto e processa o teclado até o usuário sair.
 
     Teclas: `s` salva a imagem exibida, `r` restaura a original (zerando
-    filtro, canal e stickers posicionados), `f` avança para o próximo filtro
-    (imprimindo a descrição no terminal antes de aplicá-lo), `c` avança o canal
-    (`todos → R → G → B → todos`), `n` volta a "sem filtro", `t` avança para o
-    próximo sticker (imprimindo o nome no terminal) e `q`/ESC encerra.
+    filtro, canal, operação e stickers posicionados), `f` avança para o
+    próximo filtro (imprimindo a descrição no terminal antes de aplicá-lo),
+    `c` avança o canal (`todos → R → G → B → todos`), `n` volta a "sem
+    filtro", `o` pede no terminal o caminho da segunda imagem, `m` avança para
+    a próxima operação aritmética entre a imagem original e a segunda imagem
+    (imprimindo a descrição), `t` avança para o próximo sticker (imprimindo o
+    nome no terminal) e `q`/ESC encerra.
 
     O pipeline aplicado a cada quadro é: seleção de canal, o filtro atual e,
-    por fim, os stickers já posicionados. Um clique com o botão esquerdo do
-    mouse fixa o sticker atual, centrado na posição clicada, sobre a imagem de
-    trabalho; cliques sucessivos acumulam stickers (a tecla `r` remove todos).
+    por fim, os stickers já posicionados. Quando uma operação está ativa, o
+    resultado dela substitui a imagem de trabalho antes do pipeline de
+    canal/filtro/stickers. As operações são sempre recalculadas a partir da
+    imagem original e da segunda imagem carregada (resultados anteriores não
+    são realimentados). Um clique com o botão esquerdo do mouse fixa o sticker
+    atual, centrado na posição clicada, sobre a imagem de trabalho; cliques
+    sucessivos acumulam stickers (a tecla `r` remove todos).
     """
     imagem_original = carregar_imagem(caminho_imagem)
     imagem_atual = resetar(imagem_original)
@@ -59,6 +75,8 @@ def modo_foto(caminho_imagem: str) -> None:
     sticker_atual = STICKER_PADRAO
     # Cada item é (id do sticker, x, y) na ordem em que foi clicado.
     stickers_posicionados: list[tuple[str, int, int]] = []
+    segunda_imagem: np.ndarray | None = None
+    operacao_atual: str | None = None
 
     def ao_clicar_mouse(
         evento: int,
@@ -94,10 +112,29 @@ def modo_foto(caminho_imagem: str) -> None:
                 filtro_atual = ID_NENHUM
                 canal_atual = CANAL_PADRAO
                 stickers_posicionados.clear()
+                operacao_atual = None
                 print(
                     "Imagem restaurada ao original "
-                    "(filtro, canal e stickers zerados)."
+                    "(filtro, canal, operação e stickers zerados)."
                 )
+            elif tecla == TECLA_SEGUNDA_IMAGEM:
+                carregada = _carregar_segunda_imagem()
+                if carregada is not None:
+                    segunda_imagem = carregada
+            elif tecla == TECLA_PROXIMA_OPERACAO:
+                if segunda_imagem is None:
+                    print(
+                        "Nenhuma segunda imagem carregada; pressione 'o' e "
+                        "informe o caminho antes de aplicar uma operação."
+                    )
+                else:
+                    operacao_atual = proxima_operacao(operacao_atual)
+                    _imprimir_operacao(operacao_atual)
+                    imagem_atual = aplicar_operacao(
+                        operacao_atual,
+                        imagem_original,
+                        segunda_imagem,
+                    )
             elif tecla == TECLA_PROXIMO_FILTRO:
                 filtro_atual = proximo_filtro(filtro_atual)
                 _imprimir_filtro(filtro_atual)
@@ -209,6 +246,43 @@ def _imprimir_filtro(filtro_id: str) -> None:
 
     filtro = obter_filtro(filtro_id)
     print(f"Filtro: {filtro.nome} - {filtro.descricao}")
+
+
+def _imprimir_operacao(operacao_id: str) -> None:
+    """Imprime no terminal a operação atual e a descrição do que ela faz."""
+    operacao = obter_operacao(operacao_id)
+    print(f"Operação: {operacao.nome} - {operacao.descricao}")
+
+
+def _carregar_segunda_imagem() -> np.ndarray | None:
+    """Pede no terminal o caminho da segunda imagem e a carrega.
+
+    Devolve `None` (sem levantar exceção) quando nenhum caminho é informado,
+    quando a leitura do terminal é interrompida ou quando a imagem não pode ser
+    carregada; nesses casos o estado anterior do Modo Foto é preservado.
+    """
+    try:
+        caminho = input("Caminho da segunda imagem: ").strip()
+    except EOFError:
+        print("Nenhum caminho informado; a segunda imagem não foi alterada.")
+        return None
+
+    if not caminho:
+        print("Nenhum caminho informado; a segunda imagem não foi alterada.")
+        return None
+
+    try:
+        imagem = carregar_imagem(caminho)
+    except ImagemInvalidaError as erro:
+        print(f"Erro ao carregar a segunda imagem: {erro}")
+        return None
+
+    print(
+        f"Segunda imagem carregada: {caminho} "
+        f"({imagem.shape[1]}x{imagem.shape[0]}); "
+        "pressione 'm' para aplicar uma operação."
+    )
+    return imagem
 
 
 def _janela_fechada(nome_janela: str) -> bool:
