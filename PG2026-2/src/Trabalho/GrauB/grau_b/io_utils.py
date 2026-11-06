@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime
 
 import cv2
 import numpy as np
 
 SUFIXO_EDITADO = "_editado"
+PREFIXO_CAPTURA = "captura"
+FORMATO_CAPTURA = "png"
 
 
 class ImagemInvalidaError(Exception):
@@ -43,6 +46,22 @@ def salvar_imagem(
     destino = caminho_com_sufixo(caminho_origem, sufixo)
     if not cv2.imwrite(destino, imagem):
         raise OSError(f"não foi possível salvar a imagem em '{destino}'")
+    return destino
+
+
+def salvar_frame(
+    frame: np.ndarray,
+    prefixo: str = PREFIXO_CAPTURA,
+) -> str:
+    """Salva um quadro de vídeo na pasta atual e devolve o caminho gravado.
+
+    O nome inclui um carimbo de data/hora (com microssegundos) para não
+    sobrescrever capturas anteriores.
+    """
+    carimbo = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    destino = f"{prefixo}_{carimbo}.{FORMATO_CAPTURA}"
+    if not cv2.imwrite(destino, frame):
+        raise OSError(f"não foi possível salvar o quadro em '{destino}'")
     return destino
 
 
