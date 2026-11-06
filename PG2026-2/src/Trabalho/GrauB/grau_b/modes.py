@@ -5,12 +5,17 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
+from grau_b.canais import CANAL_PADRAO, aplicar_selecao_canal, proximo_canal
+from grau_b.filtros import ID_NENHUM, aplicar_filtro, obter_filtro, proximo_filtro
 from grau_b.io_utils import carregar_imagem, resetar, salvar_frame, salvar_imagem
 
 NOME_JANELA = "Grau B - Modo Foto"
 NOME_JANELA_VIDEO = "Grau B - Modo Vídeo"
 TECLA_SALVAR = ord("s")
 TECLA_RESETAR = ord("r")
+TECLA_PROXIMO_FILTRO = ord("f")
+TECLA_PROXIMO_CANAL = ord("c")
+TECLA_SEM_FILTRO = ord("n")
 TECLAS_SAIR = {ord("q"), 27}  # 27 == ESC
 
 # Tempo (ms) de espera por tecla. Um valor curto mantém a janela responsiva
@@ -29,24 +34,44 @@ class FalhaLeituraFrameError(Exception):
 def modo_foto(caminho_imagem: str) -> None:
     """Abre a janela do Modo Foto e processa o teclado até o usuário sair.
 
-    Teclas: `s` salva a imagem atual, `r` restaura a original, `q`/ESC encerra.
+    Teclas: `s` salva a imagem exibida, `r` restaura a original (zerando
+    filtro e canal), `f` avança para o próximo filtro (imprimindo a descrição
+    no terminal antes de aplicá-lo), `c` avança o canal
+    (`todos → R → G → B → todos`), `n` volta a "sem filtro", `q`/ESC encerra.
+
+    O pipeline aplicado a cada quadro é: seleção de canal e, em seguida, o
+    filtro atual.
     """
     imagem_original = carregar_imagem(caminho_imagem)
     imagem_atual = resetar(imagem_original)
+    filtro_atual = ID_NENHUM
+    canal_atual = CANAL_PADRAO
 
     try:
         while True:
-            cv2.imshow(NOME_JANELA, imagem_atual)
+            imagem_exibida = _processar_quadro(imagem_atual, filtro_atual, canal_atual)
+            cv2.imshow(NOME_JANELA, imagem_exibida)
             tecla = cv2.waitKey(ESPERA_TECLA_MS) & 0xFF
 
             if tecla in TECLAS_SAIR:
                 break
             if tecla == TECLA_SALVAR:
-                destino = salvar_imagem(imagem_atual, caminho_imagem)
+                destino = salvar_imagem(imagem_exibida, caminho_imagem)
                 print(f"Imagem salva em: {destino}")
             elif tecla == TECLA_RESETAR:
                 imagem_atual = resetar(imagem_original)
-                print("Imagem restaurada ao original.")
+                filtro_atual = ID_NENHUM
+                canal_atual = CANAL_PADRAO
+                print("Imagem restaurada ao original (filtro e canal zerados).")
+            elif tecla == TECLA_PROXIMO_FILTRO:
+                filtro_atual = proximo_filtro(filtro_atual)
+                _imprimir_filtro(filtro_atual)
+            elif tecla == TECLA_PROXIMO_CANAL:
+                canal_atual = proximo_canal(canal_atual)
+                print(f"Canal selecionado: {canal_atual}")
+            elif tecla == TECLA_SEM_FILTRO:
+                filtro_atual = ID_NENHUM
+                _imprimir_filtro(filtro_atual)
 
             if _janela_fechada(nome_janela=NOME_JANELA):
                 break
@@ -57,12 +82,20 @@ def modo_foto(caminho_imagem: str) -> None:
 def modo_video(indice_camera: int = 0) -> None:
     """Abre a janela do Modo Vídeo e exibe a webcam ao vivo até o usuário sair.
 
-    Teclas: `s` salva o quadro atual, `q`/ESC encerra. A tecla `r` (restaurar
-    original) não se aplica ao vídeo e é ignorada.
+    Teclas: `s` salva o quadro exibido, `f` avança para o próximo filtro
+    (imprimindo a descrição no terminal antes de aplicá-lo), `c` avança o canal
+    (`todos → R → G → B → todos`), `n` volta a "sem filtro", `q`/ESC encerra.
+    A tecla `r` (restaurar original) não se aplica ao vídeo e é ignorada.
+
+    O pipeline aplicado a cada quadro é: seleção de canal e, em seguida, o
+    filtro atual.
 
     Levanta CameraIndisponivelError quando a câmera não pode ser aberta e
     FalhaLeituraFrameError quando um quadro não pode ser lido.
     """
+    filtro_atual = ID_NENHUM
+    canal_atual = CANAL_PADRAO
+
     captura = cv2.VideoCapture(indice_camera)
     if not captura.isOpened():
         captura.release()
@@ -81,21 +114,51 @@ def modo_video(indice_camera: int = 0) -> None:
                     "a captura foi interrompida"
                 )
 
-            cv2.imshow(NOME_JANELA_VIDEO, frame)
+            imagem_exibida = _processar_quadro(frame, filtro_atual, canal_atual)
+            cv2.imshow(NOME_JANELA_VIDEO, imagem_exibida)
             tecla = cv2.waitKey(ESPERA_TECLA_MS) & 0xFF
 
             if tecla in TECLAS_SAIR:
                 break
             if tecla == TECLA_SALVAR:
-                destino = salvar_frame(frame)
+                destino = salvar_frame(imagem_exibida)
                 print(f"Quadro salvo em: {destino}")
             # TECLA_RESETAR ('r') é no-op no Modo Vídeo: não há imagem original.
+            elif tecla == TECLA_PROXIMO_FILTRO:
+                filtro_atual = proximo_filtro(filtro_atual)
+                _imprimir_filtro(filtro_atual)
+            elif tecla == TECLA_PROXIMO_CANAL:
+                canal_atual = proximo_canal(canal_atual)
+                print(f"Canal selecionado: {canal_atual}")
+            elif tecla == TECLA_SEM_FILTRO:
+                filtro_atual = ID_NENHUM
+                _imprimir_filtro(filtro_atual)
 
             if _janela_fechada(nome_janela=NOME_JANELA_VIDEO):
                 break
     finally:
         captura.release()
         cv2.destroyAllWindows()
+
+
+def _processar_quadro(
+    imagem: np.ndarray,
+    filtro_id: str,
+    canal: str,
+) -> np.ndarray:
+    """Aplica o pipeline de exibição: seleção de canal e, depois, o filtro."""
+    imagem_canal = aplicar_selecao_canal(imagem, canal)
+    return aplicar_filtro(filtro_id, imagem_canal)
+
+
+def _imprimir_filtro(filtro_id: str) -> None:
+    """Imprime no terminal o filtro atual e a descrição do que ele faz."""
+    if filtro_id == ID_NENHUM:
+        print("Filtro: nenhum (imagem sem processamento).")
+        return
+
+    filtro = obter_filtro(filtro_id)
+    print(f"Filtro: {filtro.nome} - {filtro.descricao}")
 
 
 def _janela_fechada(nome_janela: str) -> bool:
