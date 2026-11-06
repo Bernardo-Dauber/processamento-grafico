@@ -15,6 +15,12 @@ from grau_b.io_utils import (
     salvar_imagem,
 )
 from grau_b.operacoes import aplicar_operacao, obter_operacao, proxima_operacao
+from grau_b.stickers import (
+    STICKER_PADRAO,
+    aplicar_sticker,
+    obter_sticker,
+    proximo_sticker,
+)
 
 NOME_JANELA = "Grau B - Modo Foto"
 NOME_JANELA_VIDEO = "Grau B - Modo Vídeo"
@@ -23,6 +29,7 @@ TECLA_RESETAR = ord("r")
 TECLA_PROXIMO_FILTRO = ord("f")
 TECLA_PROXIMO_CANAL = ord("c")
 TECLA_SEM_FILTRO = ord("n")
+TECLA_PROXIMO_STICKER = ord("t")
 TECLA_SEGUNDA_IMAGEM = ord("o")
 TECLA_PROXIMA_OPERACAO = ord("m")
 TECLAS_SAIR = {ord("q"), 27}  # 27 == ESC
@@ -44,30 +51,55 @@ def modo_foto(caminho_imagem: str) -> None:
     """Abre a janela do Modo Foto e processa o teclado até o usuário sair.
 
     Teclas: `s` salva a imagem exibida, `r` restaura a original (zerando
-    filtro, canal e operação), `f` avança para o próximo filtro (imprimindo a
-    descrição no terminal antes de aplicá-lo), `c` avança o canal
-    (`todos → R → G → B → todos`), `n` volta a "sem filtro", `o` pede no
-    terminal o caminho da segunda imagem, `m` avança para a próxima operação
-    aritmética entre a imagem original e a segunda imagem (imprimindo a
-    descrição) e `q`/ESC encerra.
+    filtro, canal, operação e stickers posicionados), `f` avança para o
+    próximo filtro (imprimindo a descrição no terminal antes de aplicá-lo),
+    `c` avança o canal (`todos → R → G → B → todos`), `n` volta a "sem
+    filtro", `o` pede no terminal o caminho da segunda imagem, `m` avança para
+    a próxima operação aritmética entre a imagem original e a segunda imagem
+    (imprimindo a descrição), `t` avança para o próximo sticker (imprimindo o
+    nome no terminal) e `q`/ESC encerra.
 
-    O pipeline aplicado a cada quadro é: seleção de canal e, em seguida, o
-    filtro atual. Quando uma operação está ativa, o resultado dela substitui a
-    imagem de trabalho, e o pipeline de canal/filtro é aplicado sobre esse
-    resultado. As operações são sempre recalculadas a partir da imagem original
-    e da segunda imagem carregada (resultados anteriores não são realimentados).
+    O pipeline aplicado a cada quadro é: seleção de canal, o filtro atual e,
+    por fim, os stickers já posicionados. Quando uma operação está ativa, o
+    resultado dela substitui a imagem de trabalho antes do pipeline de
+    canal/filtro/stickers. As operações são sempre recalculadas a partir da
+    imagem original e da segunda imagem carregada (resultados anteriores não
+    são realimentados). Um clique com o botão esquerdo do mouse fixa o sticker
+    atual, centrado na posição clicada, sobre a imagem de trabalho; cliques
+    sucessivos acumulam stickers (a tecla `r` remove todos).
     """
     imagem_original = carregar_imagem(caminho_imagem)
     imagem_atual = resetar(imagem_original)
     filtro_atual = ID_NENHUM
     canal_atual = CANAL_PADRAO
+    sticker_atual = STICKER_PADRAO
+    # Cada item é (id do sticker, x, y) na ordem em que foi clicado.
+    stickers_posicionados: list[tuple[str, int, int]] = []
     segunda_imagem: np.ndarray | None = None
     operacao_atual: str | None = None
 
+    def ao_clicar_mouse(
+        evento: int,
+        x: int,
+        y: int,
+        _flags: int,
+        _param: object,
+    ) -> None:
+        """Fixa o sticker atual no ponto clicado (centro do sticker)."""
+        if evento == cv2.EVENT_LBUTTONDOWN:
+            stickers_posicionados.append((sticker_atual, x, y))
+            nome = obter_sticker(sticker_atual).nome
+            print(f"Sticker '{nome}' fixado em ({x}, {y}).")
+
+    callback_registrado = False
     try:
         while True:
             imagem_exibida = _processar_quadro(imagem_atual, filtro_atual, canal_atual)
+            imagem_exibida = _aplicar_stickers(imagem_exibida, stickers_posicionados)
             cv2.imshow(NOME_JANELA, imagem_exibida)
+            if not callback_registrado:
+                cv2.setMouseCallback(NOME_JANELA, ao_clicar_mouse)
+                callback_registrado = True
             tecla = cv2.waitKey(ESPERA_TECLA_MS) & 0xFF
 
             if tecla in TECLAS_SAIR:
@@ -79,10 +111,11 @@ def modo_foto(caminho_imagem: str) -> None:
                 imagem_atual = resetar(imagem_original)
                 filtro_atual = ID_NENHUM
                 canal_atual = CANAL_PADRAO
+                stickers_posicionados.clear()
                 operacao_atual = None
                 print(
                     "Imagem restaurada ao original "
-                    "(filtro, canal e operação zerados)."
+                    "(filtro, canal, operação e stickers zerados)."
                 )
             elif tecla == TECLA_SEGUNDA_IMAGEM:
                 carregada = _carregar_segunda_imagem()
@@ -111,6 +144,9 @@ def modo_foto(caminho_imagem: str) -> None:
             elif tecla == TECLA_SEM_FILTRO:
                 filtro_atual = ID_NENHUM
                 _imprimir_filtro(filtro_atual)
+            elif tecla == TECLA_PROXIMO_STICKER:
+                sticker_atual = proximo_sticker(sticker_atual)
+                print(f"Sticker selecionado: {obter_sticker(sticker_atual).nome}")
 
             if _janela_fechada(nome_janela=NOME_JANELA):
                 break
@@ -188,6 +224,18 @@ def _processar_quadro(
     """Aplica o pipeline de exibição: seleção de canal e, depois, o filtro."""
     imagem_canal = aplicar_selecao_canal(imagem, canal)
     return aplicar_filtro(filtro_id, imagem_canal)
+
+
+def _aplicar_stickers(
+    imagem: np.ndarray,
+    stickers_posicionados: list[tuple[str, int, int]],
+) -> np.ndarray:
+    """Aplica, na ordem dos cliques, todos os stickers posicionados."""
+    resultado = imagem
+    for id_sticker, x, y in stickers_posicionados:
+        sticker = obter_sticker(id_sticker)
+        resultado = aplicar_sticker(resultado, sticker.imagem, (x, y))
+    return resultado
 
 
 def _imprimir_filtro(filtro_id: str) -> None:
