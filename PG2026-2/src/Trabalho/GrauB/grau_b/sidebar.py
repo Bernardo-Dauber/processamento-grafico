@@ -23,7 +23,7 @@ from grau_b.operacoes import listar_operacoes
 from grau_b.stickers import aplicar_sticker, listar_stickers
 
 LARGURA_PAINEL = 260
-ALTURA_MINIMA = 610
+ALTURA_MINIMA = 700
 LARGURA_MINIMA_AREA_IMAGEM = 420
 ALTURA_BARRA_STATUS = 26
 
@@ -63,7 +63,10 @@ class EstadoPainel:
     filtro_id: str
     nome_arquivo: str
     dica: str = ""
-    modo_foto: bool = True
+    valor_filtro: int | None = None
+    #: Webcam ligada (stickers ficam indisponíveis, só valem na foto).
+    webcam: bool = False
+    tem_foto: bool = True
     operacao_id: str | None = None
     segunda_carregada: bool = False
     sticker_id: str = ""
@@ -142,19 +145,28 @@ def _secao_canal(canvas: np.ndarray, x: int, y: int, larg: int, canal: str) -> i
     return y
 
 
-def _secao_filtro(canvas: np.ndarray, x: int, y: int, larg: int, filtro_id: str) -> int:
+def _secao_filtro(
+    canvas: np.ndarray,
+    x: int,
+    y: int,
+    larg: int,
+    filtro_id: str,
+    valor: int | None,
+) -> int:
     y = _titulo_secao(canvas, x, y, larg, "Filtro", "[f] proximo  [n] limpa")
-    altura = 78
+    altura = 98
     cv2.rectangle(canvas, (x, y), (x + larg, y + altura), _FUNDO_STATUS, -1)
     cv2.rectangle(canvas, (x, y), (x + larg, y + altura), _BORDA, 1)
     if filtro_id == ID_NENHUM:
         nome, posicao, descricao = "Sem filtro", "", "Imagem sem processamento."
+        parametro = None
     else:
         filtros = listar_filtros()
         filtro = obter_filtro(filtro_id)
         indice = [f.id for f in filtros].index(filtro_id) + 1
         nome, posicao = filtro.nome, f"{indice} de {len(filtros)}"
         descricao = filtro.descricao
+        parametro = filtro.parametro
     _texto(canvas, nome, x + 8, y + 18, _TEXTO, 0.47)
     if posicao:
         _texto(
@@ -167,7 +179,17 @@ def _secao_filtro(canvas: np.ndarray, x: int, y: int, larg: int, filtro_id: str)
         )
     linhas = textwrap.wrap(_ascii(descricao), width=36)[:3]
     for i, linha in enumerate(linhas):
-        _texto(canvas, linha, x + 8, y + 36 + i * 15, _TEXTO_SUAVE, 0.38)
+        _texto(canvas, linha, x + 8, y + 36 + i * 14, _TEXTO_SUAVE, 0.38)
+    if filtro_id != ID_NENHUM:
+        if parametro is None:
+            _texto(canvas, "Sem parametros configuraveis", x + 8, y + altura - 8,
+                   _TEXTO_MUDO, 0.38)
+        else:
+            atual = parametro.padrao if valor is None else valor
+            rotulo = f"{parametro.nome}: {atual} ({parametro.minimo}-{parametro.maximo})"
+            _texto(canvas, rotulo, x + 8, y + altura - 8, _ATIVO_TEXTO, 0.42)
+            _texto(canvas, "[+] [-]", x + larg - 8 - _largura_texto("[+] [-]", 0.4),
+                   y + altura - 8, _TEXTO_SUAVE, 0.4)
     return y + altura + 14
 
 
@@ -208,12 +230,17 @@ def _secao_sticker(canvas: np.ndarray, x: int, y: int, larg: int, atual: str) ->
     return y + linhas * 28 + 10
 
 
-def _secao_acoes(canvas: np.ndarray, x: int, y: int, larg: int, modo_foto: bool) -> int:
+def _secao_acoes(
+    canvas: np.ndarray, x: int, y: int, larg: int, estado: EstadoPainel
+) -> int:
     cv2.line(canvas, (x, y - 6), (x + larg, y - 6), _BORDA, 1)
-    acoes = [("Salvar", "s")]
-    if modo_foto:
-        acoes.append(("Restaurar original", "r"))
-    acoes.append(("Sair", "q / ESC"))
+    acoes = [
+        ("Salvar", "s"),
+        ("Restaurar tudo", "r"),
+        ("Desligar webcam" if estado.webcam else "Ligar webcam", "v"),
+        ("Abrir foto", "p"),
+        ("Sair", "q / ESC"),
+    ]
     for nome, tecla in acoes:
         _texto(canvas, nome, x, y + 10, _TEXTO_SUAVE)
         rotulo = f"[{tecla}]"
@@ -228,11 +255,11 @@ def _desenhar_painel(altura: int, estado: EstadoPainel) -> np.ndarray:
     x, larg = 12, LARGURA_PAINEL - 24
     y = 22
     y = _secao_canal(painel, x, y, larg, estado.canal) + 14
-    y = _secao_filtro(painel, x, y + 6, larg, estado.filtro_id)
-    if estado.modo_foto:
-        y = _secao_operacao(painel, x, y + 6, larg, estado)
+    y = _secao_filtro(painel, x, y + 6, larg, estado.filtro_id, estado.valor_filtro)
+    y = _secao_operacao(painel, x, y + 6, larg, estado)
+    if not estado.webcam:
         y = _secao_sticker(painel, x, y + 6, larg, estado.sticker_id)
-    _secao_acoes(painel, x, y + 14, larg, estado.modo_foto)
+    _secao_acoes(painel, x, y + 14, larg, estado)
     return painel
 
 

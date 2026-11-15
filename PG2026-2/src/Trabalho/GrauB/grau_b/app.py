@@ -3,6 +3,9 @@
 Uso:
     python -m grau_b.app --imagem caminho/para/imagem.png
     python -m grau_b.app --video
+    python -m grau_b.app --imagem caminho/para/imagem.png --video
+
+Na janela, a tecla 'v' liga/desliga a webcam e 'p' abre outra foto.
 """
 
 from __future__ import annotations
@@ -16,8 +19,7 @@ from grau_b.io_utils import ImagemInvalidaError
 from grau_b.modes import (
     CameraIndisponivelError,
     FalhaLeituraFrameError,
-    modo_foto,
-    modo_video,
+    executar,
 )
 
 CODIGO_ERRO_USO = 2
@@ -35,21 +37,17 @@ def montar_parser() -> argparse.ArgumentParser:
             "Vídeo (webcam) em janelas OpenCV."
         ),
     )
-    grupo_modos = parser.add_mutually_exclusive_group(required=True)
-    grupo_modos.add_argument(
+    parser.add_argument(
         "--imagem",
         metavar="CAMINHO",
-        help=(
-            "abre a imagem em Modo Foto. "
-            "Teclas na janela: 's' salva, 'r' restaura a original, 'q'/ESC sai."
-        ),
+        help="abre a imagem (Modo Foto); a webcam pode ser ligada com 'v'.",
     )
-    grupo_modos.add_argument(
+    parser.add_argument(
         "--video",
         action="store_true",
         help=(
-            "abre a webcam padrão (índice 0) em Modo Vídeo. "
-            "Teclas na janela: 's' salva o quadro atual, 'q'/ESC sai."
+            "liga a webcam padrão (índice 0) ao abrir. Sem --imagem, é o "
+            "único modo; com --imagem, 'v' volta para a foto."
         ),
     )
     parser.add_argument(
@@ -65,10 +63,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = montar_parser()
     args = parser.parse_args(argv)
 
-    if args.video:
-        return _executar_modo_video()
+    if args.imagem is None and not args.video:
+        parser.error("informe --imagem CAMINHO e/ou --video")
 
-    if not os.path.isfile(args.imagem):
+    if args.imagem is not None and not os.path.isfile(args.imagem):
         print(
             f"erro: arquivo de imagem não encontrado: '{args.imagem}'",
             file=sys.stderr,
@@ -76,22 +74,15 @@ def main(argv: list[str] | None = None) -> int:
         return CODIGO_ERRO_USO
 
     try:
-        modo_foto(args.imagem)
+        executar(
+            args.imagem,
+            iniciar_video=args.video,
+            indice_camera=INDICE_CAMERA_PADRAO,
+        )
     except ImagemInvalidaError as erro:
         print(f"erro: {erro}", file=sys.stderr)
         return CODIGO_ERRO_EXECUCAO
-
-    return 0
-
-
-def _executar_modo_video() -> int:
-    """Executa o Modo Vídeo e traduz falhas de captura em código de erro."""
-    try:
-        modo_video(indice_camera=INDICE_CAMERA_PADRAO)
-    except (CameraIndisponivelError, FalhaLeituraFrameError) as erro:
-        print(f"erro: {erro}", file=sys.stderr)
-        return CODIGO_ERRO_EXECUCAO
-    except OSError as erro:
+    except (CameraIndisponivelError, FalhaLeituraFrameError, OSError) as erro:
         print(f"erro: {erro}", file=sys.stderr)
         return CODIGO_ERRO_EXECUCAO
 

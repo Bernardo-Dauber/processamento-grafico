@@ -32,27 +32,51 @@ ID_NENHUM = "nenhum"
 
 
 @dataclass(frozen=True)
+class Parametro:
+    """Parâmetro inteiro configurável de um filtro (ajustado com `+` e `-`)."""
+
+    nome: str
+    padrao: int
+    minimo: int
+    maximo: int
+    passo: int
+
+
+@dataclass(frozen=True)
 class Filtro:
-    """Descrição de um filtro: identificador, rótulos e a transformação."""
+    """Descrição de um filtro: identificador, rótulos e a transformação.
+
+    `funcao(imagem, valor)` recebe o valor atual do parâmetro (ou `None` quando
+    o filtro não tem parâmetro configurável).
+    """
 
     id: str
     nome: str
     descricao: str
-    funcao: Callable[[np.ndarray], np.ndarray]
+    funcao: Callable[[np.ndarray, int | None], np.ndarray]
+    parametro: Parametro | None = None
 
 
-#: Tamanho do kernel (lado ímpar) usado pelos três filtros de suavização.
-TAMANHO_KERNEL_SUAVIZACAO = 5
-
-#: Kernel de nitidez: realça o pixel central (5×) e subtrai os vizinhos em cruz.
-KERNEL_NITIDEZ = np.array(
-    [
-        [0, -1, 0],
-        [-1, 5, -1],
-        [0, -1, 0],
-    ],
-    dtype=np.float32,
+#: Parâmetros configuráveis (um por filtro, no máximo).
+PARAM_KERNEL = Parametro("kernel", padrao=5, minimo=3, maximo=15, passo=2)
+PARAM_INTENSIDADE = Parametro("intensidade", padrao=1, minimo=1, maximo=5, passo=1)
+PARAM_LIMIAR_CANNY = Parametro("limiar", padrao=100, minimo=10, maximo=200, passo=10)
+PARAM_LIMIAR_BINARIZACAO = Parametro(
+    "limiar", padrao=127, minimo=0, maximo=255, passo=8
 )
+
+
+def _kernel_nitidez(intensidade: int) -> np.ndarray:
+    """Kernel de nitidez em cruz; com intensidade 1 é o clássico [-1, 5, -1]."""
+    k = float(intensidade)
+    return np.array(
+        [
+            [0, -k, 0],
+            [-k, 1 + 4 * k, -k],
+            [0, -k, 0],
+        ],
+        dtype=np.float32,
+    )
 
 #: Kernel de relevo (emboss): diferenças em diagonal, com brilho neutro de 128.
 KERNEL_RELEVO = np.array(
@@ -74,48 +98,42 @@ MATRIZ_SEPIA = np.array(
     dtype=np.float32,
 )
 
-#: Limiar fixo (0–255) da binarização.
-LIMIAR_BINARIZACAO = 127
 
-#: Limiares inferior e superior do detector de bordas de Canny.
-LIMIAR_CANNY_INFERIOR = 100
-LIMIAR_CANNY_SUPERIOR = 200
-
-
-def _negativo(imagem: np.ndarray) -> np.ndarray:
+def _negativo(imagem: np.ndarray, _valor: int | None = None) -> np.ndarray:
     """Inverte os valores de cada pixel (255 - valor)."""
     return cv2.bitwise_not(imagem)
 
 
-def _escala_cinza(imagem: np.ndarray) -> np.ndarray:
+def _escala_cinza(imagem: np.ndarray, _valor: int | None = None) -> np.ndarray:
     """Converte para tons de cinza e devolve em BGR de 3 canais."""
     cinza = cv2.cvtColor(imagem, cv2.COLOR_BGR2GRAY)
     return cv2.cvtColor(cinza, cv2.COLOR_GRAY2BGR)
 
 
-def _blur_media(imagem: np.ndarray) -> np.ndarray:
-    """Suaviza calculando a média dos vizinhos num kernel 5×5."""
-    kernel = (TAMANHO_KERNEL_SUAVIZACAO, TAMANHO_KERNEL_SUAVIZACAO)
-    return cv2.blur(imagem, kernel)
+def _blur_media(imagem: np.ndarray, valor: int | None = None) -> np.ndarray:
+    """Suaviza calculando a média dos vizinhos num kernel NxN."""
+    lado = valor or PARAM_KERNEL.padrao
+    return cv2.blur(imagem, (lado, lado))
 
 
-def _blur_gaussiano(imagem: np.ndarray) -> np.ndarray:
-    """Suaviza com peso gaussiano num kernel 5×5 (sigma automático)."""
-    kernel = (TAMANHO_KERNEL_SUAVIZACAO, TAMANHO_KERNEL_SUAVIZACAO)
-    return cv2.GaussianBlur(imagem, kernel, 0)
+def _blur_gaussiano(imagem: np.ndarray, valor: int | None = None) -> np.ndarray:
+    """Suaviza com peso gaussiano num kernel NxN (sigma automático)."""
+    lado = valor or PARAM_KERNEL.padrao
+    return cv2.GaussianBlur(imagem, (lado, lado), 0)
 
 
-def _blur_mediana(imagem: np.ndarray) -> np.ndarray:
-    """Suaviza com a mediana dos vizinhos num kernel 5×5 (remove sal e pimenta)."""
-    return cv2.medianBlur(imagem, TAMANHO_KERNEL_SUAVIZACAO)
+def _blur_mediana(imagem: np.ndarray, valor: int | None = None) -> np.ndarray:
+    """Suaviza com a mediana dos vizinhos num kernel NxN (remove sal e pimenta)."""
+    return cv2.medianBlur(imagem, valor or PARAM_KERNEL.padrao)
 
 
-def _realce_nitidez(imagem: np.ndarray) -> np.ndarray:
+def _realce_nitidez(imagem: np.ndarray, valor: int | None = None) -> np.ndarray:
     """Acentua bordas e detalhes com um kernel de nitidez 3×3."""
-    return cv2.filter2D(imagem, -1, KERNEL_NITIDEZ)
+    intensidade = valor or PARAM_INTENSIDADE.padrao
+    return cv2.filter2D(imagem, -1, _kernel_nitidez(intensidade))
 
 
-def _bordas_sobel(imagem: np.ndarray) -> np.ndarray:
+def _bordas_sobel(imagem: np.ndarray, _valor: int | None = None) -> np.ndarray:
     """Detecta bordas pelo gradiente de intensidade (Sobel) e devolve BGR."""
     cinza = cv2.cvtColor(imagem, cv2.COLOR_BGR2GRAY)
     gradiente_x = cv2.Sobel(cinza, cv2.CV_64F, 1, 0, ksize=3)
@@ -125,28 +143,30 @@ def _bordas_sobel(imagem: np.ndarray) -> np.ndarray:
     return cv2.cvtColor(bordas, cv2.COLOR_GRAY2BGR)
 
 
-def _bordas_canny(imagem: np.ndarray) -> np.ndarray:
+def _bordas_canny(imagem: np.ndarray, valor: int | None = None) -> np.ndarray:
     """Detecta bordas como linhas binárias finas (Canny) e devolve BGR."""
     cinza = cv2.cvtColor(imagem, cv2.COLOR_BGR2GRAY)
-    bordas = cv2.Canny(cinza, LIMIAR_CANNY_INFERIOR, LIMIAR_CANNY_SUPERIOR)
+    inferior = valor or PARAM_LIMIAR_CANNY.padrao
+    bordas = cv2.Canny(cinza, inferior, 2 * inferior)
     return cv2.cvtColor(bordas, cv2.COLOR_GRAY2BGR)
 
 
-def _relevo(imagem: np.ndarray) -> np.ndarray:
+def _relevo(imagem: np.ndarray, _valor: int | None = None) -> np.ndarray:
     """Simula relevo 3D nas transições de intensidade (emboss)."""
     relevo = cv2.filter2D(imagem.astype(np.float32), cv2.CV_32F, KERNEL_RELEVO)
     relevo = np.clip(relevo + 128.0, 0, 255).astype(np.uint8)
     return relevo
 
 
-def _binarizacao(imagem: np.ndarray) -> np.ndarray:
+def _binarizacao(imagem: np.ndarray, valor: int | None = None) -> np.ndarray:
     """Converte para preto e branco puro por limiar fixo e devolve BGR."""
     cinza = cv2.cvtColor(imagem, cv2.COLOR_BGR2GRAY)
-    _, binaria = cv2.threshold(cinza, LIMIAR_BINARIZACAO, 255, cv2.THRESH_BINARY)
+    limiar = PARAM_LIMIAR_BINARIZACAO.padrao if valor is None else valor
+    _, binaria = cv2.threshold(cinza, limiar, 255, cv2.THRESH_BINARY)
     return cv2.cvtColor(binaria, cv2.COLOR_GRAY2BGR)
 
 
-def _equalizacao(imagem: np.ndarray) -> np.ndarray:
+def _equalizacao(imagem: np.ndarray, _valor: int | None = None) -> np.ndarray:
     """Realça o contraste equalizando o histograma da luminância (YCrCb)."""
     ycrcb = cv2.cvtColor(imagem, cv2.COLOR_BGR2YCrCb)
     y, cr, cb = cv2.split(ycrcb)
@@ -155,7 +175,7 @@ def _equalizacao(imagem: np.ndarray) -> np.ndarray:
     return cv2.cvtColor(equalizada, cv2.COLOR_YCrCb2BGR)
 
 
-def _sepia(imagem: np.ndarray) -> np.ndarray:
+def _sepia(imagem: np.ndarray, _valor: int | None = None) -> np.ndarray:
     """Aplica uma transformação de cor em tom sépia (envelhecido)."""
     sepia = cv2.transform(imagem.astype(np.float32), MATRIZ_SEPIA)
     return np.clip(sepia, 0, 255).astype(np.uint8)
@@ -178,35 +198,34 @@ FILTROS: tuple[Filtro, ...] = (
     Filtro(
         id="blur_media",
         nome="Desfoque por média",
-        descricao=(
-            "Suaviza a imagem calculando a média dos pixels vizinhos "
-            f"(kernel {TAMANHO_KERNEL_SUAVIZACAO}×{TAMANHO_KERNEL_SUAVIZACAO})."
-        ),
+        descricao="Suaviza a imagem calculando a média dos pixels vizinhos.",
         funcao=_blur_media,
+        parametro=PARAM_KERNEL,
     ),
     Filtro(
         id="blur_gaussiano",
         nome="Desfoque Gaussiano",
         descricao=(
-            "Suaviza a imagem com peso maior para pixels mais próximos do centro "
-            f"(kernel {TAMANHO_KERNEL_SUAVIZACAO}×{TAMANHO_KERNEL_SUAVIZACAO})."
+            "Suaviza a imagem com peso maior para pixels mais próximos do centro."
         ),
         funcao=_blur_gaussiano,
+        parametro=PARAM_KERNEL,
     ),
     Filtro(
         id="blur_mediana",
         nome="Desfoque de mediana",
         descricao=(
-            "Suaviza removendo ruído tipo \"sal e pimenta\", preservando bordas "
-            f"(kernel {TAMANHO_KERNEL_SUAVIZACAO}×{TAMANHO_KERNEL_SUAVIZACAO})."
+            "Suaviza removendo ruído tipo \"sal e pimenta\", preservando bordas."
         ),
         funcao=_blur_mediana,
+        parametro=PARAM_KERNEL,
     ),
     Filtro(
         id="realce_nitidez",
         nome="Realce de nitidez",
         descricao="Acentua bordas e detalhes (unsharp mask / kernel de nitidez).",
         funcao=_realce_nitidez,
+        parametro=PARAM_INTENSIDADE,
     ),
     Filtro(
         id="bordas_sobel",
@@ -217,8 +236,12 @@ FILTROS: tuple[Filtro, ...] = (
     Filtro(
         id="bordas_canny",
         nome="Bordas (Canny)",
-        descricao="Detecta bordas como linhas binárias finas.",
+        descricao=(
+            "Detecta bordas como linhas binárias finas; o limiar superior é o "
+            "dobro do inferior."
+        ),
         funcao=_bordas_canny,
+        parametro=PARAM_LIMIAR_CANNY,
     ),
     Filtro(
         id="relevo",
@@ -231,6 +254,7 @@ FILTROS: tuple[Filtro, ...] = (
         nome="Binarização",
         descricao="Converte a imagem para preto e branco puro por limiar.",
         funcao=_binarizacao,
+        parametro=PARAM_LIMIAR_BINARIZACAO,
     ),
     Filtro(
         id="equalizacao",
@@ -264,15 +288,60 @@ def obter_filtro(id_filtro: str) -> Filtro:
     raise ValueError(f"filtro desconhecido: {id_filtro!r}")
 
 
-def aplicar_filtro(id_filtro: str | None, imagem: np.ndarray) -> np.ndarray:
+def valor_padrao(id_filtro: str) -> int | None:
+    """Valor padrão do parâmetro do filtro (`None` se não tiver parâmetro)."""
+    if id_filtro == ID_NENHUM:
+        return None
+    parametro = obter_filtro(id_filtro).parametro
+    return None if parametro is None else parametro.padrao
+
+
+def ajustar_parametro(id_filtro: str, valor: int | None, direcao: int) -> int | None:
+    """Soma `direcao` (+1/-1) passos ao valor, respeitando mínimo e máximo.
+
+    Devolve `None` quando o filtro não tem parâmetro configurável.
+    """
+    if id_filtro == ID_NENHUM:
+        return None
+    parametro = obter_filtro(id_filtro).parametro
+    if parametro is None:
+        return None
+    atual = parametro.padrao if valor is None else valor
+    novo = atual + direcao * parametro.passo
+    return max(parametro.minimo, min(parametro.maximo, novo))
+
+
+def descrever_filtro(id_filtro: str, valor: int | None = None) -> str:
+    """Descrição do filtro mais seus parâmetros configuráveis e o valor atual."""
+    if id_filtro == ID_NENHUM:
+        return "Imagem sem processamento."
+    filtro = obter_filtro(id_filtro)
+    parametro = filtro.parametro
+    if parametro is None:
+        return f"{filtro.descricao} Sem parâmetros configuráveis."
+    atual = parametro.padrao if valor is None else valor
+    return (
+        f"{filtro.descricao} Parâmetro: {parametro.nome} "
+        f"({parametro.minimo} a {parametro.maximo}, atual {atual}); "
+        "ajuste com + e -."
+    )
+
+
+def aplicar_filtro(
+    id_filtro: str | None, imagem: np.ndarray, valor: int | None = None
+) -> np.ndarray:
     """Aplica o filtro `id_filtro` à imagem e devolve o resultado.
 
+    `valor` é o parâmetro configurável do filtro (usa o padrão se `None`).
     `None` e `"nenhum"` são o estado "sem filtro": a própria imagem é devolvida
     sem processamento. Levanta `ValueError` para um `id` desconhecido.
     """
     if id_filtro is None or id_filtro == ID_NENHUM:
         return imagem
-    return obter_filtro(id_filtro).funcao(imagem)
+    filtro = obter_filtro(id_filtro)
+    if valor is None and filtro.parametro is not None:
+        valor = filtro.parametro.padrao
+    return filtro.funcao(imagem, valor)
 
 
 def proximo_filtro(id_atual: str | None) -> str:
