@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import cv2
 import numpy as np
 
@@ -15,6 +17,7 @@ from grau_b.io_utils import (
     salvar_imagem,
 )
 from grau_b.operacoes import aplicar_operacao, obter_operacao, proxima_operacao
+from grau_b.sidebar import EstadoPainel, compor_janela
 from grau_b.stickers import (
     STICKER_PADRAO,
     aplicar_sticker,
@@ -37,6 +40,8 @@ TECLAS_SAIR = {ord("q"), 27}  # 27 == ESC
 # Tempo (ms) de espera por tecla. Um valor curto mantém a janela responsiva
 # aos eventos do sistema (redesenho, botão de fechar) enquanto aguarda input.
 ESPERA_TECLA_MS = 30
+
+DICA_PADRAO_FOTO = "Clique na imagem para posicionar o sticker"
 
 
 class CameraIndisponivelError(Exception):
@@ -77,6 +82,9 @@ def modo_foto(caminho_imagem: str) -> None:
     stickers_posicionados: list[tuple[str, int, int]] = []
     segunda_imagem: np.ndarray | None = None
     operacao_atual: str | None = None
+    dica = DICA_PADRAO_FOTO
+    altura_img, largura_img = imagem_original.shape[:2]
+    nome_arquivo = os.path.basename(caminho_imagem)
 
     def ao_clicar_mouse(
         evento: int,
@@ -86,17 +94,30 @@ def modo_foto(caminho_imagem: str) -> None:
         _param: object,
     ) -> None:
         """Fixa o sticker atual no ponto clicado (centro do sticker)."""
-        if evento == cv2.EVENT_LBUTTONDOWN:
+        nonlocal dica
+        # Cliques fora da imagem (barra lateral, margens) são ignorados.
+        if evento == cv2.EVENT_LBUTTONDOWN and x < largura_img and y < altura_img:
             stickers_posicionados.append((sticker_atual, x, y))
             nome = obter_sticker(sticker_atual).nome
             print(f"Sticker '{nome}' fixado em ({x}, {y}).")
+            dica = f"Sticker '{nome}' fixado"
 
     callback_registrado = False
     try:
         while True:
             imagem_exibida = _processar_quadro(imagem_atual, filtro_atual, canal_atual)
             imagem_exibida = _aplicar_stickers(imagem_exibida, stickers_posicionados)
-            cv2.imshow(NOME_JANELA, imagem_exibida)
+            painel = EstadoPainel(
+                canal=canal_atual,
+                filtro_id=filtro_atual,
+                nome_arquivo=nome_arquivo,
+                dica=dica,
+                modo_foto=True,
+                operacao_id=operacao_atual,
+                segunda_carregada=segunda_imagem is not None,
+                sticker_id=sticker_atual,
+            )
+            cv2.imshow(NOME_JANELA, compor_janela(imagem_exibida, painel))
             if not callback_registrado:
                 cv2.setMouseCallback(NOME_JANELA, ao_clicar_mouse)
                 callback_registrado = True
@@ -107,12 +128,14 @@ def modo_foto(caminho_imagem: str) -> None:
             if tecla == TECLA_SALVAR:
                 destino = salvar_imagem(imagem_exibida, caminho_imagem)
                 print(f"Imagem salva em: {destino}")
+                dica = f"Salva em {os.path.basename(str(destino))}"
             elif tecla == TECLA_RESETAR:
                 imagem_atual = resetar(imagem_original)
                 filtro_atual = ID_NENHUM
                 canal_atual = CANAL_PADRAO
                 stickers_posicionados.clear()
                 operacao_atual = None
+                dica = "Imagem restaurada"
                 print(
                     "Imagem restaurada ao original "
                     "(filtro, canal, operação e stickers zerados)."
@@ -121,8 +144,10 @@ def modo_foto(caminho_imagem: str) -> None:
                 carregada = _carregar_segunda_imagem()
                 if carregada is not None:
                     segunda_imagem = carregada
+                    dica = "2a imagem carregada: use [m]"
             elif tecla == TECLA_PROXIMA_OPERACAO:
                 if segunda_imagem is None:
+                    dica = "Carregue a 2a imagem com [o]"
                     print(
                         "Nenhuma segunda imagem carregada; pressione 'o' e "
                         "informe o caminho antes de aplicar uma operação."
@@ -170,6 +195,7 @@ def modo_video(indice_camera: int = 0) -> None:
     """
     filtro_atual = ID_NENHUM
     canal_atual = CANAL_PADRAO
+    dica = ""
 
     captura = cv2.VideoCapture(indice_camera)
     if not captura.isOpened():
@@ -190,7 +216,14 @@ def modo_video(indice_camera: int = 0) -> None:
                 )
 
             imagem_exibida = _processar_quadro(frame, filtro_atual, canal_atual)
-            cv2.imshow(NOME_JANELA_VIDEO, imagem_exibida)
+            painel = EstadoPainel(
+                canal=canal_atual,
+                filtro_id=filtro_atual,
+                nome_arquivo="Webcam (indice %d)" % indice_camera,
+                dica=dica,
+                modo_foto=False,
+            )
+            cv2.imshow(NOME_JANELA_VIDEO, compor_janela(imagem_exibida, painel))
             tecla = cv2.waitKey(ESPERA_TECLA_MS) & 0xFF
 
             if tecla in TECLAS_SAIR:
@@ -198,6 +231,7 @@ def modo_video(indice_camera: int = 0) -> None:
             if tecla == TECLA_SALVAR:
                 destino = salvar_frame(imagem_exibida)
                 print(f"Quadro salvo em: {destino}")
+                dica = f"Salvo em {os.path.basename(str(destino))}"
             # TECLA_RESETAR ('r') é no-op no Modo Vídeo: não há imagem original.
             elif tecla == TECLA_PROXIMO_FILTRO:
                 filtro_atual = proximo_filtro(filtro_atual)

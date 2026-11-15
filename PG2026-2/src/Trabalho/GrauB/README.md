@@ -63,6 +63,7 @@ GrauB/
     ├── canais.py      # seleção de canal de cor (todos / R / G / B)
     ├── filtros.py     # registro dos 12 filtros de imagem
     ├── operacoes.py   # registro das 4 operações aritméticas entre imagens
+    ├── sidebar.py     # barra lateral de comandos desenhada ao lado da imagem
     └── stickers.py    # geração dos 5 stickers RGBA e blending com alpha
 ```
 
@@ -74,6 +75,7 @@ GrauB/
 | `grau_b/canais.py` | `aplicar_selecao_canal()` — devolve a imagem com os outros dois canais zerados — e `proximo_canal()` para o ciclo `todos → R → G → B → todos`. |
 | `grau_b/filtros.py` | Registro `FILTROS` com os 12 filtros (cada um com `id`, `nome`, `descricao` e `funcao`), mais `listar_filtros()`, `obter_filtro()`, `aplicar_filtro()` e `proximo_filtro()`. |
 | `grau_b/operacoes.py` | Registro `OPERACOES` com as 4 operações aritméticas entre duas imagens, redimensionamento automático da segunda imagem e `aplicar_operacao()` / `proxima_operacao()`. |
+| `grau_b/sidebar.py` | `compor_janela()` anexa à direita da imagem uma barra lateral (desenhada com `cv2.rectangle`/`putText`) com listas de Canal, Filtro (nome, posição e descrição), Operação, Sticker e as teclas de atalho, além de uma barra de status com o arquivo e a última ação. O painel é só visual: os comandos continuam no teclado e a imagem salva não inclui a barra. |
 | `grau_b/stickers.py` | Gera programaticamente os 5 stickers RGBA (80×80) em memória e expõe `listar_stickers()`, `obter_sticker()`, `proximo_sticker()` e `aplicar_sticker()` (blending por alpha, com recorte nas bordas). |
 | `grau_b/__init__.py` | Versão do pacote (`__version__ = "0.1.0"`), usada por `--version`. |
 
