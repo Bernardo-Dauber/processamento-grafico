@@ -65,6 +65,7 @@ GrauB/
     ├── canais.py      # seleção de canal de cor (todos / R / G / B)
     ├── filtros.py     # registro dos 12 filtros de imagem
     ├── operacoes.py   # registro das 4 operações aritméticas entre imagens
+    ├── teclas.py      # códigos de tecla compartilhados pelo loop e pelo painel
     ├── sidebar.py     # barra lateral de comandos desenhada ao lado da imagem
     └── stickers.py    # geração dos 5 stickers RGBA e blending com alpha
 ```
@@ -77,7 +78,7 @@ GrauB/
 | `grau_b/canais.py` | `aplicar_selecao_canal()` — devolve a imagem com os outros dois canais zerados — e `proximo_canal()` para o ciclo `todos → R → G → B → todos`. |
 | `grau_b/filtros.py` | Registro `FILTROS` com os 12 filtros (cada um com `id`, `nome`, `descricao`, `funcao` e, quando existe, um `Parametro` configurável), mais `listar_filtros()`, `obter_filtro()`, `aplicar_filtro()`, `proximo_filtro()`, `ajustar_parametro()` e `descrever_filtro()`. |
 | `grau_b/operacoes.py` | Registro `OPERACOES` com as 4 operações aritméticas entre duas imagens, redimensionamento automático da segunda imagem e `aplicar_operacao()` / `proxima_operacao()`. |
-| `grau_b/sidebar.py` | `compor_janela()` anexa à direita da imagem uma barra lateral (desenhada com `cv2.rectangle`/`putText`) com listas de Canal, Filtro (nome, posição e descrição), Operação, Sticker e as teclas de atalho, além de uma barra de status com o arquivo e a última ação. O painel é só visual: os comandos continuam no teclado e a imagem salva não inclui a barra. |
+| `grau_b/sidebar.py` | `compor_janela()` anexa à direita da imagem uma barra lateral (desenhada com `cv2.rectangle`/`putText`) com listas de Canal, Filtro (nome, posição e descrição), Operação, Sticker e as teclas de atalho, além de uma barra de status com o arquivo e a última ação. Cada botão registra uma região clicável (`Regiao`) tratada pelo callback de mouse em `modes.py`; a imagem salva não inclui a barra. |
 | `grau_b/stickers.py` | Gera programaticamente os 5 stickers RGBA (80×80) em memória e expõe `listar_stickers()`, `obter_sticker()`, `proximo_sticker()` e `aplicar_sticker()` (blending por alpha, com recorte nas bordas). |
 | `grau_b/__init__.py` | Versão do pacote (`__version__ = "0.1.0"`), usada por `--version`. |
 
@@ -130,6 +131,12 @@ encerra com erro de uso.
 
 ### Controles
 
+Tudo o que existe no teclado também é **clicável na barra lateral**: canais, a lista
+completa de filtros, os botões `-`/`+` do parâmetro, as operações (clicar de novo
+desliga), "Carregar 2a imagem", os stickers e os botões Salvar, Restaurar,
+Ligar/Desligar webcam, Abrir foto e Sair. Os atalhos de teclado abaixo continuam
+valendo.
+
 | Entrada | Ação |
 | --- | --- |
 | `f` | Próximo filtro do ciclo (12 filtros + "nenhum"). O nome, a descrição e os parâmetros configuráveis são impressos no terminal e mostrados na barra lateral. |
@@ -139,7 +146,7 @@ encerra com erro de uso.
 | `o` | Pede no terminal o caminho de uma segunda imagem (a janela fica parada enquanto o `input()` espera). |
 | `m` | Próxima operação aritmética entre a imagem exibida (foto ou quadro da webcam) e a segunda imagem. Sem segunda imagem, apenas avisa. |
 | `t` | Próximo sticker (só na foto). |
-| clique esquerdo | Fixa o sticker atual **centrado** no ponto clicado, só na foto e dentro da imagem. Cliques sucessivos acumulam. |
+| clique esquerdo | Fixa o sticker atual **centrado** no ponto clicado, só na foto e dentro da imagem. Cliques sucessivos acumulam. Cliques na barra lateral acionam os botões dela. |
 | `v` | Liga/desliga a webcam. Desligar volta para a foto; sem foto carregada a webcam não desliga (use `p` antes). |
 | `p` | Pede no terminal o caminho de uma foto e a carrega no lugar da atual. |
 | `s` | Salva o que está na tela, sem a barra lateral: foto em `<nome>_editado.<ext>` ao lado da original; quadro da webcam em `captura_AAAAMMDD_HHMMSS_ffffff.png` na pasta atual. |

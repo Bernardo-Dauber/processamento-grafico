@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 import cv2
 import numpy as np
 
+from grau_b import teclas
 from grau_b.canais import CANAL_PADRAO, aplicar_selecao_canal, proximo_canal
 from grau_b.filtros import (
     ID_NENHUM,
@@ -29,7 +30,7 @@ from grau_b.io_utils import (
     salvar_imagem,
 )
 from grau_b.operacoes import aplicar_operacao, obter_operacao, proxima_operacao
-from grau_b.sidebar import EstadoPainel, compor_janela
+from grau_b.sidebar import Acao, EstadoPainel, Regiao, compor_janela
 from grau_b.stickers import (
     STICKER_PADRAO,
     aplicar_sticker,
@@ -38,19 +39,19 @@ from grau_b.stickers import (
 )
 
 NOME_JANELA = "Grau B - Processamento de Imagem e Vídeo"
-TECLA_SALVAR = ord("s")
-TECLA_RESETAR = ord("r")
-TECLA_PROXIMO_FILTRO = ord("f")
-TECLA_PROXIMO_CANAL = ord("c")
-TECLA_SEM_FILTRO = ord("n")
-TECLA_PROXIMO_STICKER = ord("t")
-TECLA_SEGUNDA_IMAGEM = ord("o")
-TECLA_PROXIMA_OPERACAO = ord("m")
-TECLA_WEBCAM = ord("v")
-TECLA_ABRIR_FOTO = ord("p")
-TECLAS_AUMENTAR = {ord("+"), ord("=")}
-TECLAS_DIMINUIR = {ord("-"), ord("_")}
-TECLAS_SAIR = {ord("q"), 27}  # 27 == ESC
+TECLA_SALVAR = teclas.SALVAR
+TECLA_RESETAR = teclas.RESETAR
+TECLA_PROXIMO_FILTRO = teclas.PROXIMO_FILTRO
+TECLA_PROXIMO_CANAL = teclas.PROXIMO_CANAL
+TECLA_SEM_FILTRO = teclas.SEM_FILTRO
+TECLA_PROXIMO_STICKER = teclas.PROXIMO_STICKER
+TECLA_SEGUNDA_IMAGEM = teclas.SEGUNDA_IMAGEM
+TECLA_PROXIMA_OPERACAO = teclas.PROXIMA_OPERACAO
+TECLA_WEBCAM = teclas.WEBCAM
+TECLA_ABRIR_FOTO = teclas.ABRIR_FOTO
+TECLAS_AUMENTAR = teclas.AUMENTAR
+TECLAS_DIMINUIR = teclas.DIMINUIR
+TECLAS_SAIR = teclas.SAIR_TECLAS
 
 # Tempo (ms) de espera por tecla. Um valor curto mantém a janela responsiva
 # aos eventos do sistema (redesenho, botão de fechar) enquanto aguarda input.
@@ -86,6 +87,11 @@ class Sessao:
     #: Cada item é (id do sticker, x, y) na ordem em que foi clicado.
     stickers: list[tuple[str, int, int]] = field(default_factory=list)
     dica: str = ""
+    #: Regiões clicáveis do painel no último quadro desenhado.
+    regioes: list[Regiao] = field(default_factory=list)
+    #: Ações de cliques no painel, tratadas no loop depois do `waitKey`.
+    pendentes: list[Acao] = field(default_factory=list)
+    sair: bool = False
     #: Resultado em cache da operação sobre a foto: (op, foto, segunda, saída).
     cache_operacao: tuple[str, np.ndarray, np.ndarray, np.ndarray] | None = None
 
@@ -143,10 +149,14 @@ def executar(
     def ao_clicar_mouse(
         evento: int, x: int, y: int, _flags: int, _param: object
     ) -> None:
-        """Fixa o sticker atual no ponto clicado (só na foto, dentro dela)."""
-        if evento != cv2.EVENT_LBUTTONDOWN or sessao.webcam_ligada:
+        """Clique no painel vira ação pendente; na foto, fixa o sticker."""
+        if evento != cv2.EVENT_LBUTTONDOWN:
             return
-        if sessao.foto is None:
+        for regiao in sessao.regioes:
+            if regiao.contem(x, y):
+                sessao.pendentes.append(regiao.acao)
+                return
+        if sessao.webcam_ligada or sessao.foto is None:
             return
         altura, largura = sessao.foto.shape[:2]
         if x < largura and y < altura:
@@ -164,7 +174,8 @@ def executar(
             exibida = _processar(sessao, base)
             if not sessao.webcam_ligada:
                 exibida = _aplicar_stickers(exibida, sessao.stickers)
-            cv2.imshow(NOME_JANELA, compor_janela(exibida, _estado_painel(sessao)))
+            janela, sessao.regioes = compor_janela(exibida, _estado_painel(sessao))
+            cv2.imshow(NOME_JANELA, janela)
             if not callback_registrado:
                 cv2.setMouseCallback(NOME_JANELA, ao_clicar_mouse)
                 callback_registrado = True
@@ -173,6 +184,10 @@ def executar(
             if tecla in TECLAS_SAIR:
                 break
             _tratar_tecla(tecla, sessao, exibida)
+            while sessao.pendentes:
+                _tratar_acao(sessao.pendentes.pop(0), sessao, exibida)
+            if sessao.sair:
+                break
 
             if _janela_fechada(NOME_JANELA):
                 break
@@ -253,6 +268,39 @@ def _tratar_tecla(tecla: int, sessao: Sessao, exibida: np.ndarray) -> None:
         print(f"Canal selecionado: {sessao.canal}")
     elif tecla == TECLA_PROXIMO_STICKER:
         sessao.sticker = proximo_sticker(sessao.sticker)
+        print(f"Sticker selecionado: {obter_sticker(sessao.sticker).nome}")
+
+
+def _tratar_acao(acao: Acao, sessao: Sessao, exibida: np.ndarray) -> None:
+    """Executa a ação de um clique no painel (equivale a apertar a tecla)."""
+    tipo, valor = acao
+    if tipo == "tecla":
+        if valor in TECLAS_SAIR:
+            sessao.sair = True
+        else:
+            _tratar_tecla(int(valor), sessao, exibida)  # type: ignore[arg-type]
+    elif tipo == "canal":
+        sessao.canal = str(valor)
+        print(f"Canal selecionado: {sessao.canal}")
+    elif tipo == "filtro":
+        sessao.filtro = str(valor)
+        _imprimir_filtro(sessao)
+    elif tipo == "param":
+        _ajustar_parametro(sessao, int(valor))  # type: ignore[arg-type]
+    elif tipo == "operacao":
+        if sessao.segunda is None:
+            sessao.dica = "Carregue a 2a imagem primeiro"
+            print("Nenhuma segunda imagem carregada; clique em 'Carregar 2a imagem'.")
+        elif sessao.operacao == valor:  # clicar de novo desliga a operação
+            sessao.operacao = None
+            sessao.dica = "Operacao desligada"
+        else:
+            sessao.operacao = str(valor)
+            _imprimir_operacao(sessao.operacao)
+    elif tipo == "segunda":
+        _tratar_tecla(TECLA_SEGUNDA_IMAGEM, sessao, exibida)
+    elif tipo == "sticker":
+        sessao.sticker = str(valor)
         print(f"Sticker selecionado: {obter_sticker(sessao.sticker).nome}")
 
 

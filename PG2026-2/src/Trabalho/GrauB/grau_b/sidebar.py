@@ -1,9 +1,9 @@
-"""Barra lateral de comandos desenhada ao lado da imagem (Modos Foto e Vídeo).
+"""Barra lateral clicável desenhada ao lado da imagem (Modos Foto e Vídeo).
 
 O painel é desenhado com primitivas do OpenCV (`rectangle`, `circle`,
 `putText`) sobre um canvas BGR e anexado à direita da imagem processada. Mostra
-o estado atual (canal, filtro, operação, sticker) e as teclas de atalho, em
-listas com nomes por extenso.
+o estado atual (canal, filtro, operação, sticker) e as teclas de atalho; cada
+botão também registra uma região clicável (`Regiao`) para o callback de mouse.
 
 A fonte do OpenCV (Hershey) não tem acentos, então os textos passam por
 `_ascii` antes de serem desenhados.
@@ -14,15 +14,17 @@ from __future__ import annotations
 import textwrap
 import unicodedata
 from dataclasses import dataclass
+from typing import Callable
 
 import cv2
 import numpy as np
 
+from grau_b import teclas as t
 from grau_b.filtros import ID_NENHUM, listar_filtros, obter_filtro
 from grau_b.operacoes import listar_operacoes
 from grau_b.stickers import aplicar_sticker, listar_stickers
 
-LARGURA_PAINEL = 260
+LARGURA_PAINEL = 300
 ALTURA_MINIMA = 700
 LARGURA_MINIMA_AREA_IMAGEM = 420
 ALTURA_BARRA_STATUS = 26
@@ -30,7 +32,7 @@ ALTURA_BARRA_STATUS = 26
 # Cores em BGR.
 _FUNDO_PAINEL = (252, 252, 252)
 _FUNDO_AREA = (245, 243, 241)
-_FUNDO_STATUS = (255, 255, 255)
+_FUNDO_BOTAO = (255, 255, 255)
 _BORDA = (214, 214, 214)
 _TEXTO = (40, 40, 40)
 _TEXTO_SUAVE = (105, 105, 105)
@@ -45,14 +47,42 @@ _NOME_CANAL = {
     "G": "Canal verde",
     "B": "Canal azul",
 }
-_SIMBOLO_OPERACAO = {
-    "soma": "+",
-    "subtracao": "-",
-    "multiplicacao": "x",
-    "mescla": "%",
+_SIMBOLO_OPERACAO = {"soma": "+", "subtracao": "-", "multiplicacao": "x", "mescla": "%"}
+_NOME_CURTO_FILTRO = {
+    ID_NENHUM: "Sem filtro",
+    "negativo": "Negativo",
+    "cinza": "Escala de cinza",
+    "blur_media": "Desfoque media",
+    "blur_gaussiano": "Desfoque gauss.",
+    "blur_mediana": "Desfoque mediana",
+    "realce_nitidez": "Realce nitidez",
+    "bordas_sobel": "Bordas Sobel",
+    "bordas_canny": "Bordas Canny",
+    "relevo": "Relevo",
+    "binarizacao": "Binarizacao",
+    "equalizacao": "Equalizacao",
+    "sepia": "Sepia",
 }
 
 _FONTE = cv2.FONT_HERSHEY_SIMPLEX
+
+#: Ação de um clique: (tipo, valor). Tipos: "canal", "filtro", "param",
+#: "operacao", "segunda", "sticker" e "tecla" (valor = código da tecla).
+Acao = tuple[str, object]
+
+
+@dataclass(frozen=True)
+class Regiao:
+    """Retângulo clicável (coordenadas da janela composta) e sua ação."""
+
+    x0: int
+    y0: int
+    x1: int
+    y1: int
+    acao: Acao
+
+    def contem(self, x: int, y: int) -> bool:
+        return self.x0 <= x < self.x1 and self.y0 <= y < self.y1
 
 
 @dataclass
@@ -96,178 +126,228 @@ def _largura_texto(texto: str, escala: float = 0.45) -> int:
     return cv2.getTextSize(_ascii(texto), _FONTE, escala, 1)[0][0]
 
 
-def _titulo_secao(
-    canvas: np.ndarray, x: int, y: int, largura: int, titulo: str, atalhos: str
-) -> int:
-    """Desenha o título da seção com os atalhos à direita; devolve o novo y."""
-    _texto(canvas, titulo.upper(), x, y, _TEXTO_MUDO, 0.38)
-    if atalhos:
-        _texto(
-            canvas,
-            atalhos,
-            x + largura - _largura_texto(atalhos, 0.38),
-            y,
-            _TEXTO_SUAVE,
-            0.38,
-        )
-    return y + 8
+class _Painel:
+    """Canvas do painel mais a lista de regiões clicáveis que ele gera."""
 
+    def __init__(self, altura: int) -> None:
+        self.img = np.full((altura, LARGURA_PAINEL, 3), _FUNDO_PAINEL, dtype=np.uint8)
+        cv2.line(self.img, (0, 0), (0, altura), _BORDA, 1)
+        self.regioes: list[Regiao] = []  # coordenadas locais ao painel
 
-def _linha(
-    canvas: np.ndarray, x: int, y: int, largura: int, ativo: bool, altura: int = 24
-) -> tuple[int, int]:
-    """Desenha o fundo de uma linha selecionável; devolve (x_texto, y_base)."""
-    fundo = _ATIVO_FUNDO if ativo else _FUNDO_STATUS
-    borda = _ATIVO_BORDA if ativo else _BORDA
-    cv2.rectangle(canvas, (x, y), (x + largura, y + altura), fundo, -1)
-    cv2.rectangle(canvas, (x, y), (x + largura, y + altura), borda, 1)
-    return x + 28, y + altura - 8
-
-
-def _bolinha_canal(canvas: np.ndarray, cx: int, cy: int, canal: str) -> None:
-    if canal == "todos":
-        for i, cor in enumerate(_COR_CANAL.values()):
-            cv2.ellipse(
-                canvas, (cx, cy), (6, 6), 0, i * 120, (i + 1) * 120, cor, -1, cv2.LINE_AA
+    def titulo(self, x: int, y: int, larg: int, titulo: str, atalhos: str = "") -> int:
+        _texto(self.img, titulo.upper(), x, y, _TEXTO_MUDO, 0.38)
+        if atalhos:
+            _texto(
+                self.img,
+                atalhos,
+                x + larg - _largura_texto(atalhos, 0.38),
+                y,
+                _TEXTO_SUAVE,
+                0.38,
             )
-    else:
-        cv2.circle(canvas, (cx, cy), 6, _COR_CANAL[canal], -1, cv2.LINE_AA)
+        return y + 8
+
+    def botao(
+        self,
+        x: int,
+        y: int,
+        larg: int,
+        altura: int,
+        rotulo: str,
+        acao: Acao | None,
+        ativo: bool = False,
+        recuo: int = 8,
+        icone: Callable[[np.ndarray, int, int], None] | None = None,
+        escala: float = 0.4,
+    ) -> None:
+        fundo = _ATIVO_FUNDO if ativo else _FUNDO_BOTAO
+        borda = _ATIVO_BORDA if ativo else _BORDA
+        cv2.rectangle(self.img, (x, y), (x + larg, y + altura), fundo, -1)
+        cv2.rectangle(self.img, (x, y), (x + larg, y + altura), borda, 1)
+        if icone is not None:
+            icone(self.img, x + 13, y + altura // 2)
+            recuo = 26
+        cor = _ATIVO_TEXTO if ativo else _TEXTO_SUAVE
+        _texto(self.img, rotulo, x + recuo, y + altura // 2 + 4, cor, escala)
+        if acao is not None:
+            self.regioes.append(Regiao(x, y, x + larg, y + altura, acao))
+
+    def grade(
+        self,
+        x: int,
+        y: int,
+        larg: int,
+        itens: list[tuple[str, Acao, bool, Callable | None]],
+        colunas: int = 2,
+        altura: int = 24,
+        espaco: int = 4,
+        escala: float = 0.4,
+    ) -> int:
+        """Desenha botões em grade; o último, se sobrar sozinho, ocupa a linha."""
+        largura_item = (larg - espaco * (colunas - 1)) // colunas
+        for i, (rotulo, acao, ativo, icone) in enumerate(itens):
+            linha, coluna = divmod(i, colunas)
+            sozinho = i == len(itens) - 1 and coluna == 0 and colunas > 1
+            self.botao(
+                x + coluna * (largura_item + espaco),
+                y + linha * (altura + espaco),
+                larg if sozinho else largura_item,
+                altura,
+                rotulo,
+                acao,
+                ativo,
+                icone=icone,
+                escala=escala,
+            )
+        linhas = (len(itens) + colunas - 1) // colunas
+        return y + linhas * (altura + espaco)
 
 
-def _secao_canal(canvas: np.ndarray, x: int, y: int, larg: int, canal: str) -> int:
-    y = _titulo_secao(canvas, x, y, larg, "Canal", "[c]")
-    for id_canal, nome in _NOME_CANAL.items():
-        ativo = id_canal == canal
-        tx, ty = _linha(canvas, x, y, larg, ativo)
-        _bolinha_canal(canvas, x + 14, y + 12, id_canal)
-        _texto(canvas, nome, tx, ty, _ATIVO_TEXTO if ativo else _TEXTO_SUAVE)
-        y += 28
-    return y
-
-
-def _secao_filtro(
-    canvas: np.ndarray,
-    x: int,
-    y: int,
-    larg: int,
-    filtro_id: str,
-    valor: int | None,
-) -> int:
-    y = _titulo_secao(canvas, x, y, larg, "Filtro", "[f] proximo  [n] limpa")
-    altura = 98
-    cv2.rectangle(canvas, (x, y), (x + larg, y + altura), _FUNDO_STATUS, -1)
-    cv2.rectangle(canvas, (x, y), (x + larg, y + altura), _BORDA, 1)
-    if filtro_id == ID_NENHUM:
-        nome, posicao, descricao = "Sem filtro", "", "Imagem sem processamento."
-        parametro = None
-    else:
-        filtros = listar_filtros()
-        filtro = obter_filtro(filtro_id)
-        indice = [f.id for f in filtros].index(filtro_id) + 1
-        nome, posicao = filtro.nome, f"{indice} de {len(filtros)}"
-        descricao = filtro.descricao
-        parametro = filtro.parametro
-    _texto(canvas, nome, x + 8, y + 18, _TEXTO, 0.47)
-    if posicao:
-        _texto(
-            canvas,
-            posicao,
-            x + larg - 8 - _largura_texto(posicao, 0.4),
-            y + 18,
-            _TEXTO_MUDO,
-            0.4,
-        )
-    linhas = textwrap.wrap(_ascii(descricao), width=36)[:3]
-    for i, linha in enumerate(linhas):
-        _texto(canvas, linha, x + 8, y + 36 + i * 14, _TEXTO_SUAVE, 0.38)
-    if filtro_id != ID_NENHUM:
-        if parametro is None:
-            _texto(canvas, "Sem parametros configuraveis", x + 8, y + altura - 8,
-                   _TEXTO_MUDO, 0.38)
+def _icone_canal(canal: str) -> Callable[[np.ndarray, int, int], None]:
+    def desenhar(canvas: np.ndarray, cx: int, cy: int) -> None:
+        if canal == "todos":
+            for i, cor in enumerate(_COR_CANAL.values()):
+                cv2.ellipse(
+                    canvas, (cx, cy), (6, 6), 0, i * 120, (i + 1) * 120, cor, -1,
+                    cv2.LINE_AA,
+                )
         else:
-            atual = parametro.padrao if valor is None else valor
-            rotulo = f"{parametro.nome}: {atual} ({parametro.minimo}-{parametro.maximo})"
-            _texto(canvas, rotulo, x + 8, y + altura - 8, _ATIVO_TEXTO, 0.42)
-            _texto(canvas, "[+] [-]", x + larg - 8 - _largura_texto("[+] [-]", 0.4),
-                   y + altura - 8, _TEXTO_SUAVE, 0.4)
-    return y + altura + 14
+            cv2.circle(canvas, (cx, cy), 6, _COR_CANAL[canal], -1, cv2.LINE_AA)
+
+    return desenhar
 
 
-def _secao_operacao(
-    canvas: np.ndarray, x: int, y: int, larg: int, estado: EstadoPainel
-) -> int:
-    y = _titulo_secao(canvas, x, y, larg, "Operacao com 2a imagem", "[o] [m]")
-    for operacao in listar_operacoes():
-        ativo = operacao.id == estado.operacao_id
-        tx, ty = _linha(canvas, x, y, larg, ativo)
-        cor = _ATIVO_TEXTO if ativo else _TEXTO_SUAVE
-        _texto(canvas, _SIMBOLO_OPERACAO.get(operacao.id, "?"), x + 10, ty, cor, 0.5, 2)
-        _texto(canvas, operacao.nome, tx, ty, cor)
-        y += 28
-    if not estado.segunda_carregada:
-        _texto(canvas, "Pressione [o] e informe a 2a imagem", x, y + 6, _TEXTO_MUDO, 0.37)
-        y += 12
-    return y + 14
+def _icone_simbolo(simbolo: str) -> Callable[[np.ndarray, int, int], None]:
+    def desenhar(canvas: np.ndarray, cx: int, cy: int) -> None:
+        _texto(canvas, simbolo, cx - 4, cy + 5, _TEXTO_SUAVE, 0.5, 2)
+
+    return desenhar
 
 
-def _secao_sticker(canvas: np.ndarray, x: int, y: int, larg: int, atual: str) -> int:
-    y = _titulo_secao(canvas, x, y, larg, "Sticker", "[t]")
-    meia = (larg - 4) // 2
-    for i, sticker in enumerate(listar_stickers()):
-        coluna, linha_idx = i % 2, i // 2
-        # O último sticker (ímpar) ocupa a linha inteira.
-        ultimo_sozinho = i == len(listar_stickers()) - 1 and i % 2 == 0
-        largura_item = larg if ultimo_sozinho else meia
-        px = x + coluna * (meia + 4)
-        py = y + linha_idx * 28
-        ativo = sticker.id == atual
-        _linha(canvas, px, py, largura_item, ativo)
-        miniatura = cv2.resize(sticker.imagem, (18, 18), interpolation=cv2.INTER_AREA)
-        canvas[:] = aplicar_sticker(canvas, miniatura, (px + 14, py + 12))
-        cor = _ATIVO_TEXTO if ativo else _TEXTO_SUAVE
-        _texto(canvas, sticker.nome, px + 28, py + 16, cor, 0.42)
-    linhas = (len(listar_stickers()) + 1) // 2
-    return y + linhas * 28 + 10
+def _icone_sticker(imagem: np.ndarray) -> Callable[[np.ndarray, int, int], None]:
+    miniatura = cv2.resize(imagem, (16, 16), interpolation=cv2.INTER_AREA)
+
+    def desenhar(canvas: np.ndarray, cx: int, cy: int) -> None:
+        canvas[:] = aplicar_sticker(canvas, miniatura, (cx, cy))
+
+    return desenhar
 
 
-def _secao_acoes(
-    canvas: np.ndarray, x: int, y: int, larg: int, estado: EstadoPainel
-) -> int:
-    cv2.line(canvas, (x, y - 6), (x + larg, y - 6), _BORDA, 1)
-    acoes = [
-        ("Salvar", "s"),
-        ("Restaurar tudo", "r"),
-        ("Desligar webcam" if estado.webcam else "Ligar webcam", "v"),
-        ("Abrir foto", "p"),
-        ("Sair", "q / ESC"),
+def _secao_canal(p: _Painel, x: int, y: int, larg: int, canal: str) -> int:
+    y = p.titulo(x, y, larg, "Canal", "[c]")
+    itens = [
+        (nome, ("canal", id_canal), id_canal == canal, _icone_canal(id_canal))
+        for id_canal, nome in _NOME_CANAL.items()
     ]
-    for nome, tecla in acoes:
-        _texto(canvas, nome, x, y + 10, _TEXTO_SUAVE)
-        rotulo = f"[{tecla}]"
-        _texto(canvas, rotulo, x + larg - _largura_texto(rotulo), y + 10, _TEXTO_SUAVE)
-        y += 22
-    return y
+    return p.grade(x, y, larg, itens)
 
 
-def _desenhar_painel(altura: int, estado: EstadoPainel) -> np.ndarray:
-    painel = np.full((altura, LARGURA_PAINEL, 3), _FUNDO_PAINEL, dtype=np.uint8)
-    cv2.line(painel, (0, 0), (0, altura), _BORDA, 1)
+def _secao_filtro(p: _Painel, x: int, y: int, larg: int, estado: EstadoPainel) -> int:
+    y = p.titulo(x, y, larg, "Filtro", "[f] proximo  [n] limpa")
+    itens = [
+        (
+            _NOME_CURTO_FILTRO[id_filtro],
+            ("filtro", id_filtro),
+            id_filtro == estado.filtro_id,
+            None,
+        )
+        for id_filtro in [ID_NENHUM, *(f.id for f in listar_filtros())]
+    ]
+    y = p.grade(x, y, larg, itens, altura=22, escala=0.38)
+    return _cartao_filtro(p, x, y, larg, estado) + 14
+
+
+def _cartao_filtro(
+    p: _Painel, x: int, y: int, larg: int, estado: EstadoPainel
+) -> int:
+    """Descrição do filtro atual e, se houver, o parâmetro com botões [-] [+]."""
+    altura = 66
+    cv2.rectangle(p.img, (x, y), (x + larg, y + altura), _FUNDO_BOTAO, -1)
+    cv2.rectangle(p.img, (x, y), (x + larg, y + altura), _BORDA, 1)
+    if estado.filtro_id == ID_NENHUM:
+        descricao, parametro = "Imagem sem processamento.", None
+    else:
+        filtro = obter_filtro(estado.filtro_id)
+        descricao, parametro = filtro.descricao, filtro.parametro
+    for i, linha in enumerate(textwrap.wrap(_ascii(descricao), width=46)[:2]):
+        _texto(p.img, linha, x + 8, y + 16 + i * 14, _TEXTO_SUAVE, 0.38)
+    base = y + altura - 9
+    if estado.filtro_id == ID_NENHUM:
+        return y + altura
+    if parametro is None:
+        _texto(p.img, "Sem parametros configuraveis", x + 8, base, _TEXTO_MUDO, 0.38)
+        return y + altura
+    atual = parametro.padrao if estado.valor_filtro is None else estado.valor_filtro
+    rotulo = f"{parametro.nome}: {atual} ({parametro.minimo}-{parametro.maximo})"
+    _texto(p.img, rotulo, x + 8, base, _ATIVO_TEXTO, 0.42)
+    p.botao(x + larg - 56, y + altura - 24, 24, 18, "-", ("param", -1), recuo=9, escala=0.5)
+    p.botao(x + larg - 28, y + altura - 24, 24, 18, "+", ("param", +1), recuo=8, escala=0.5)
+    return y + altura
+
+
+def _secao_operacao(p: _Painel, x: int, y: int, larg: int, estado: EstadoPainel) -> int:
+    y = p.titulo(x, y, larg, "Operacao com 2a imagem", "[o] [m]")
+    itens = [
+        (
+            operacao.nome,
+            ("operacao", operacao.id),
+            operacao.id == estado.operacao_id,
+            _icone_simbolo(_SIMBOLO_OPERACAO.get(operacao.id, "?")),
+        )
+        for operacao in listar_operacoes()
+    ]
+    y = p.grade(x, y, larg, itens, escala=0.38)
+    rotulo = "Trocar 2a imagem" if estado.segunda_carregada else "Carregar 2a imagem"
+    p.botao(x, y, larg, 22, rotulo, ("segunda", None), escala=0.4)
+    return y + 22 + 14
+
+
+def _secao_sticker(p: _Painel, x: int, y: int, larg: int, atual: str) -> int:
+    y = p.titulo(x, y, larg, "Sticker", "[t]")
+    itens = [
+        (s.nome, ("sticker", s.id), s.id == atual, _icone_sticker(s.imagem))
+        for s in listar_stickers()
+    ]
+    return p.grade(x, y, larg, itens) + 10
+
+
+def _secao_acoes(p: _Painel, x: int, y: int, larg: int, estado: EstadoPainel) -> int:
+    itens = [
+        ("Salvar [s]", ("tecla", t.SALVAR), False, None),
+        ("Restaurar [r]", ("tecla", t.RESETAR), False, None),
+        (
+            "Desligar webcam [v]" if estado.webcam else "Ligar webcam [v]",
+            ("tecla", t.WEBCAM),
+            estado.webcam,
+            None,
+        ),
+        ("Abrir foto [p]", ("tecla", t.ABRIR_FOTO), False, None),
+        ("Sair [q]", ("tecla", t.SAIR), False, None),
+    ]
+    return p.grade(x, y, larg, itens, escala=0.38)
+
+
+def _desenhar_painel(altura: int, estado: EstadoPainel) -> _Painel:
+    p = _Painel(altura)
     x, larg = 12, LARGURA_PAINEL - 24
     y = 22
-    y = _secao_canal(painel, x, y, larg, estado.canal) + 14
-    y = _secao_filtro(painel, x, y + 6, larg, estado.filtro_id, estado.valor_filtro)
-    y = _secao_operacao(painel, x, y + 6, larg, estado)
+    y = _secao_canal(p, x, y, larg, estado.canal) + 10
+    y = _secao_filtro(p, x, y + 6, larg, estado)
+    y = _secao_operacao(p, x, y + 6, larg, estado)
     if not estado.webcam:
-        y = _secao_sticker(painel, x, y + 6, larg, estado.sticker_id)
-    _secao_acoes(painel, x, y + 14, larg, estado)
-    return painel
+        y = _secao_sticker(p, x, y + 6, larg, estado.sticker_id)
+    _secao_acoes(p, x, y + 6, larg, estado)
+    return p
 
 
-def compor_janela(imagem: np.ndarray, estado: EstadoPainel) -> np.ndarray:
-    """Devolve a imagem no canto superior esquerdo + barra de status + painel.
+def compor_janela(
+    imagem: np.ndarray, estado: EstadoPainel
+) -> tuple[np.ndarray, list[Regiao]]:
+    """Devolve a janela composta e as regiões clicáveis do painel.
 
-    A imagem mantém suas coordenadas originais (origem em (0, 0)), então
-    cliques com `x < largura` e `y < altura` continuam mapeando para ela.
+    A imagem fica no canto superior esquerdo (origem em (0, 0)), então cliques
+    com `x < largura` e `y < altura` continuam mapeando para ela. As regiões
+    vêm em coordenadas da janela composta.
     """
     alt_img, larg_img = imagem.shape[:2]
     altura = max(alt_img + ALTURA_BARRA_STATUS, ALTURA_MINIMA)
@@ -277,7 +357,7 @@ def compor_janela(imagem: np.ndarray, estado: EstadoPainel) -> np.ndarray:
     area[:alt_img, :larg_img] = imagem
 
     y_barra = altura - ALTURA_BARRA_STATUS
-    cv2.rectangle(area, (0, y_barra), (largura_area, altura), _FUNDO_STATUS, -1)
+    cv2.rectangle(area, (0, y_barra), (largura_area, altura), _FUNDO_BOTAO, -1)
     cv2.line(area, (0, y_barra), (largura_area, y_barra), _BORDA, 1)
     _texto(area, estado.nome_arquivo, 10, altura - 9, _TEXTO_SUAVE, 0.42)
     if estado.dica:
@@ -290,4 +370,11 @@ def compor_janela(imagem: np.ndarray, estado: EstadoPainel) -> np.ndarray:
             0.42,
         )
 
-    return np.hstack([area, _desenhar_painel(altura, estado)])
+    painel = _desenhar_painel(altura, estado)
+    regioes = [
+        Regiao(
+            r.x0 + largura_area, r.y0, r.x1 + largura_area, r.y1, r.acao
+        )
+        for r in painel.regioes
+    ]
+    return np.hstack([area, painel.img]), regioes
