@@ -1,24 +1,37 @@
-# Lista de Exercícios 2 — Matriz de Projeção Ortográfica e viewport
+# Lista de Exercícios 2 — Matriz de Projeção Ortográfica e Viewport
 
-*Processamento Gráfico: Fundamentos* (Unisinos) — projeção ortográfica (window/ortho),
-mapeamento NDC → *viewport* e interação com o mouse.
+## Autor
 
-## Como compilar e executar
+- **Bernardo Dauber** — Ciência da Computação, Unisinos (`be.daubervieira@gmail.com`)
 
-A partir da raiz do repositório:
+## Descrição
+
+Exercícios de **Projeção Ortográfica (`window`/`ortho`), mapeamento NDC → *viewport* e interação com o mouse** da disciplina *Processamento Gráfico: Fundamentos* (Unisinos, 2026/2) — [Enunciado (PDF)](../../../../Lista%202.pdf) · [Índice do Repositório](../../../../README.md).
+
+## Informações Técnicas
+
+- **Linguagem:** C++17
+- **API Gráfica:** OpenGL 3.3+ (*Core Profile*)
+- **Dependências:** GLFW, GLAD, GLM (configuradas em `PG2026-2/CMakeLists.txt`)
+- **Build:** CMake 3.11+
+
+## Como Compilar e Executar
+
+A partir da pasta `PG2026-2/` (onde fica o `CMakeLists.txt`):
 
 ```bash
+cd PG2026-2
 cmake -S . -B build
 cmake --build build -j
 ```
 
-Cada exercício vira um executável dentro de `build/`:
+Cada exercício gera um executável dentro de `PG2026-2/build/`:
 
 ```bash
-./build/Ex1   # Janela do mundo (ortho) -10..10 x -10..10
+./build/Ex1   # Janela do mundo (ortho) -10..10 x -10..10 (Windows: .\build\Ex1.exe)
 ./build/Ex2   # Janela do mundo 0..800 x 600..0 (Y invertido)
 ./build/Ex3   # Cena desenhada com a câmera 2D
-./build/Ex4   # Viewport restrito a um quadrante  (teclas 1..4; padrão: sup. direito)
+./build/Ex4   # Viewport restrito a um quadrante (teclas 1..4; padrão: sup. direito)
 ./build/Ex5   # Mesma cena desenhada nos 4 quadrantes
 ./build/Ex6   # Triângulos criados pelo clique do mouse (tecla C limpa)
 ```
@@ -30,7 +43,16 @@ O `Ex4` também aceita o quadrante inicial por linha de comando
 > (`glfwGetFramebufferSize`), que pode ser maior que o tamanho da janela em
 > pontos (`glfwGetWindowSize`). Os exercícios 4–6 já tratam isso.
 
-## Arquivos
+## Checklist de Exercícios
+
+- [x] **Ex1** — Janela do mundo `-10..10 × -10..10` com correção de proporção
+- [x] **Ex2** — Janela do mundo `0..800 × 600..0` (coordenadas de pixel, Y invertido)
+- [x] **Ex3** — Cena posicionada com câmera 2D e análise teórica
+- [x] **Ex4** — *Viewport* restrito a um único quadrante (selecionável por teclas `1`–`4`)
+- [x] **Ex5** — Renderização da mesma cena nos 4 quadrantes
+- [x] **Ex6** — Criação interativa de triângulos coloridos pelo clique do mouse
+
+## Estrutura do Projeto
 
 | Arquivo | Exercício |
 |---|---|

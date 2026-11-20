@@ -1,28 +1,48 @@
 # Lista de Exercícios 3 — Criando Triângulos a partir do Clique do Mouse
 
-*Processamento Gráfico: Fundamentos* (Unisinos) — buffers de geometria, envio de
-dados para o *shader* e interação com o mouse.
+## Autor
 
-## Como compilar e executar
+- **Bernardo Dauber** — Ciência da Computação, Unisinos (`be.daubervieira@gmail.com`)
 
-A partir da pasta `PG2026-2` (onde fica o `CMakeLists.txt`; a raiz do
+## Descrição
+
+Exercício de **buffers de geometria dinâmicos, envio de dados ao *shader* e interação com o mouse** da disciplina *Processamento Gráfico: Fundamentos* (Unisinos, 2026/2) — [Enunciado (PDF)](../../../../Lista%203.pdf) · [Índice do Repositório](../../../../README.md).
+
+## Informações Técnicas
+
+- **Linguagem:** C++17
+- **API Gráfica:** OpenGL 3.3+ (*Core Profile*)
+- **Dependências:** GLFW, GLAD, GLM (configuradas em `PG2026-2/CMakeLists.txt`)
+- **Build:** CMake 3.11+
+
+## Como Compilar e Executar
+
+A partir da pasta `PG2026-2/` (onde fica o `CMakeLists.txt`; a raiz do
 repositório git fica um nível acima):
 
 ```bash
+cd PG2026-2
 cmake -S . -B build
 cmake --build build -j
 ```
 
-O exercício vira o executável `Lista3` dentro de `build/`:
+O exercício gera o executável `Lista3` dentro de `PG2026-2/build/`:
 
 ```bash
-./build/Lista3
+./build/Lista3        # no Windows: .\build\Lista3.exe
 ```
 
 > Se o executável não aparecer logo após criar a pasta (erro de
 > `undefined reference to main`), re-execute `cmake -S . -B build`: o
 > `file(GLOB CONFIGURE_DEPENDS)` do `CMakeLists.txt` precisa reavaliar a lista
 > de fontes quando uma pasta nova é adicionada.
+
+## Checklist de Requisitos
+
+- [x] 1 clique do botão esquerdo cria 1 vértice na posição exata do cursor (1 unidade = 1 pixel via `glm::ortho(0, 800, 600, 0)`)
+- [x] A cada 3 vértices forma-se 1 triângulo completo
+- [x] Cada novo triângulo recebe uma cor distinta (rotação de matiz pelo ângulo áureo)
+- [x] Vértices pendentes exibidos como pontos e tecla `C` para limpar a cena
 
 ## Controles
 
@@ -34,7 +54,7 @@ O exercício vira o executável `Lista3` dentro de `build/`:
 
 A barra de título mostra a contagem de vértices, de triângulos e o FPS.
 
-## Arquivos
+## Estrutura do Projeto
 
 | Arquivo | Descrição |
 |---|---|

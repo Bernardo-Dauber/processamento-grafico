@@ -1,20 +1,34 @@
 # Lista de Exercícios 1 — Introdução à OpenGL Moderna
 
-Primitivas Gráficas, *Shaders* & *Buffers* — Processamento Gráfico: Fundamentos (Unisinos)
+## Autor
 
-## Como compilar e executar
+- **Bernardo Dauber** — Ciência da Computação, Unisinos (`be.daubervieira@gmail.com`)
 
-A partir da raiz do repositório:
+## Descrição
+
+Exercícios de **Primitivas Gráficas, *Shaders* & *Buffers*** da disciplina *Processamento Gráfico: Fundamentos* (Unisinos, 2026/2) — [Enunciado (PDF)](../../../../Lista1.pdf) · [Índice do Repositório](../../../../README.md).
+
+## Informações Técnicas
+
+- **Linguagem:** C++17
+- **API Gráfica:** OpenGL 3.3+ (*Core Profile*)
+- **Dependências:** GLFW, GLAD, GLM (configuradas em `PG2026-2/CMakeLists.txt`)
+- **Build:** CMake 3.11+
+
+## Como Compilar e Executar
+
+A partir da pasta `PG2026-2/` (onde fica o `CMakeLists.txt`):
 
 ```bash
+cd PG2026-2
 cmake -S . -B build
 cmake --build build -j
 ```
 
-Cada exercício vira um executável dentro de `build/`:
+Cada exercício gera um executável dentro de `PG2026-2/build/`:
 
 ```bash
-./build/1        # Exercício 1
+./build/1        # Exercício 1 (no Windows: .\build\1.exe)
 ./build/2        # Exercício 2
 ./build/3        # Exercício 3
 ./build/4        # Exercício 4
@@ -24,7 +38,14 @@ Os exercícios 1 e 2 aceitam, opcionalmente, o modo/forma inicial como argumento
 de linha de comando (ex.: `./build/2 6` abre direto na estrela). Em todos eles,
 `ESC` fecha a janela.
 
-## Arquivos
+## Checklist de Exercícios
+
+- [x] **Exercício 1** — Dois triângulos nos 4 modos de desenho (`GL_TRIANGLES`, `GL_LINE_LOOP`, `GL_POINTS` e combinado)
+- [x] **Exercício 2** — Círculo paramétrico, octógono, pentágono, Pac-man, fatia de pizza, estrela (Desafio 1) e espiral (Desafio 2)
+- [x] **Exercício 3** — Triângulo com cor por vértice (*interleaved VBO* e atributos no shader)
+- [x] **Exercício 4** — Reprodução de desenho em papel quadriculado (`4/desenho-referencia.png`) com primitivas OpenGL
+
+## Estrutura do Projeto
 
 | Arquivo | Exercício |
 |---|---|
