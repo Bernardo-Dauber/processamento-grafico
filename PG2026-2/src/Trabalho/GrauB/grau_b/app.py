@@ -1,11 +1,10 @@
 """Ponto de entrada do Trabalho Grau B.
 
 Uso:
+    python -m grau_b.app
     python -m grau_b.app --imagem caminho/para/imagem.png
     python -m grau_b.app --video
     python -m grau_b.app --imagem caminho/para/imagem.png --video
-
-Na janela, a tecla 'v' liga/desliga a webcam e 'p' abre outra foto.
 """
 
 from __future__ import annotations
@@ -33,22 +32,19 @@ def montar_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="grau_b.app",
         description=(
-            "Trabalho Grau B de Processamento Gráfico: modos Foto (imagem) e "
-            "Vídeo (webcam) em janelas OpenCV."
+            "Trabalho Grau B de Processamento Gráfico: interface gráfica Tkinter "
+            "para edição de imagens e vídeo com OpenCV."
         ),
     )
     parser.add_argument(
         "--imagem",
         metavar="CAMINHO",
-        help="abre a imagem (Modo Foto); a webcam pode ser ligada com 'v'.",
+        help="abre a imagem indicada ao iniciar (Modo Foto).",
     )
     parser.add_argument(
         "--video",
         action="store_true",
-        help=(
-            "liga a webcam padrão (índice 0) ao abrir. Sem --imagem, é o "
-            "único modo; com --imagem, 'v' volta para a foto."
-        ),
+        help="liga a webcam padrão (índice 0) ao iniciar (Modo Vídeo).",
     )
     parser.add_argument(
         "--version",
@@ -62,9 +58,6 @@ def main(argv: list[str] | None = None) -> int:
     """Executa o app e devolve o código de saída."""
     parser = montar_parser()
     args = parser.parse_args(argv)
-
-    if args.imagem is None and not args.video:
-        parser.error("informe --imagem CAMINHO e/ou --video")
 
     if args.imagem is not None and not os.path.isfile(args.imagem):
         print(

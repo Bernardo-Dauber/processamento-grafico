@@ -20,12 +20,14 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from pathlib import Path
 
 import cv2
 import numpy as np
 
 #: Lado (em pixels) de todos os stickers gerados.
 TAMANHO_STICKER = 80
+_DIR_SPRITESHEETS = Path(__file__).resolve().parent / "assets" / "spritesheets"
 
 # Cores no espaço RGB (a conversão para BGR acontece em `aplicar_sticker`).
 _COR_AMARELO = (255, 214, 0)
@@ -41,11 +43,76 @@ _CENTRO = (TAMANHO_STICKER // 2, TAMANHO_STICKER // 2)
 
 @dataclass(frozen=True)
 class Sticker:
-    """Sticker disponível: identificador, rótulo e a imagem RGBA."""
+    """Sticker disponível: identificador, rótulo, imagem RGBA e quadros de animação.
+
+    Para stickers estáticos, `quadros` contém apenas `(imagem,)` e `animado` é
+    `False`. Para stickers animados por spritesheet, `quadros` armazena todos os
+    quadros recortados do arquivo `.png` e `imagem` é o primeiro quadro.
+    """
 
     id: str
     nome: str
     imagem: np.ndarray
+    quadros: tuple[np.ndarray, ...] = ()
+    animado: bool = False
+    fps: int = 10
+
+    def quadro(self, indice: int = 0) -> np.ndarray:
+        """Devolve o quadro RGBA correspondente ao índice de animação."""
+        if not self.quadros:
+            return self.imagem
+        return self.quadros[indice % len(self.quadros)]
+
+
+def carregar_spritesheet(
+    caminho: Path | str,
+    largura_quadro: int = TAMANHO_STICKER,
+    altura_quadro: int = TAMANHO_STICKER,
+) -> tuple[np.ndarray, ...]:
+    """Lê um spritesheet `.png` RGBA (BGRA no OpenCV) e recorta seus quadros.
+
+    Converte cada quadro de BGRA para RGBA para manter a mesma convenção dos
+    stickers estáticos deste módulo.
+    """
+    caminho_path = Path(caminho)
+    folha = cv2.imread(str(caminho_path), cv2.IMREAD_UNCHANGED)
+    if folha is None or folha.ndim != 3 or folha.shape[2] != 4:
+        raise ValueError(
+            f"spritesheet RGBA inválido ou não encontrado: {caminho_path}"
+        )
+    altura, largura = folha.shape[:2]
+    colunas = largura // largura_quadro
+    linhas = altura // altura_quadro
+    if colunas == 0 or linhas == 0:
+        raise ValueError(
+            f"dimensões do spritesheet ({largura}x{altura}) menores que o quadro "
+            f"({largura_quadro}x{altura_quadro})"
+        )
+
+    quadros: list[np.ndarray] = []
+    for linha in range(linhas):
+        for coluna in range(colunas):
+            y0 = linha * altura_quadro
+            x0 = coluna * largura_quadro
+            recorte_bgra = folha[y0 : y0 + altura_quadro, x0 : x0 + largura_quadro]
+            recorte_rgba = cv2.cvtColor(recorte_bgra, cv2.COLOR_BGRA2RGBA)
+            quadros.append(recorte_rgba)
+    return tuple(quadros)
+
+
+def _criar_sticker_animado(
+    id_sticker: str, nome: str, arquivo_png: str, fps: int = 10
+) -> Sticker:
+    """Cria um `Sticker` animado carregando o spritesheet em `assets/spritesheets/`."""
+    quadros = carregar_spritesheet(_DIR_SPRITESHEETS / arquivo_png)
+    return Sticker(
+        id=id_sticker,
+        nome=nome,
+        imagem=quadros[0],
+        quadros=quadros,
+        animado=True,
+        fps=fps,
+    )
 
 
 def _tela_rgb() -> np.ndarray:
@@ -183,14 +250,32 @@ def gerar_selo_ok() -> np.ndarray:
     return _compor_rgba(rgb, alpha)
 
 
-#: Registro ordenado de stickers. A ordem é a do ciclo da tecla `t`.
+#: Registro ordenado de stickers (5 estáticos + 3 animados por spritesheet).
 STICKERS: tuple[Sticker, ...] = (
     Sticker(id="estrela", nome="Estrela", imagem=gerar_estrela()),
     Sticker(id="coracao", nome="Coração", imagem=gerar_coracao()),
     Sticker(id="circulo", nome="Círculo", imagem=gerar_circulo()),
     Sticker(id="triangulo", nome="Triângulo", imagem=gerar_triangulo()),
     Sticker(id="selo_ok", nome="Selo OK", imagem=gerar_selo_ok()),
+    _criar_sticker_animado(
+        "anim_estrela", "Estrela Pulsante [Anim]", "estrela_pulsante.png", fps=10
+    ),
+    _criar_sticker_animado(
+        "anim_coracao", "Coração Batendo [Anim]", "coracao_batendo.png", fps=8
+    ),
+    _criar_sticker_animado(
+        "anim_arco_iris", "Arco-Íris Girando [Anim]", "arco_iris_girando.png", fps=12
+    ),
 )
+
+
+def obter_quadro_sticker(id_sticker: str, tempo_segundos: float = 0.0) -> np.ndarray:
+    """Devolve o quadro RGBA atual do sticker (estático ou animado por spritesheet)."""
+    sticker = obter_sticker(id_sticker)
+    if not sticker.animado or not sticker.quadros:
+        return sticker.imagem
+    indice = int(tempo_segundos * sticker.fps) % len(sticker.quadros)
+    return sticker.quadros[indice]
 
 #: Sticker selecionado quando o Modo Foto é aberto.
 STICKER_PADRAO = STICKERS[0].id

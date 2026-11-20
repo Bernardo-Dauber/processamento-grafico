@@ -344,6 +344,33 @@ def aplicar_filtro(
     return filtro.funcao(imagem, valor)
 
 
+@dataclass
+class EtapaFiltro:
+    """Uma etapa individual no pipeline sequencial de filtros."""
+
+    id_filtro: str
+    valor: int | None = None
+
+    def rotulo(self) -> str:
+        """Texto amigável para exibir na lista do pipeline."""
+        filtro = obter_filtro(self.id_filtro)
+        if filtro.parametro is None:
+            return filtro.nome
+        atual = filtro.parametro.padrao if self.valor is None else self.valor
+        return f"{filtro.nome} ({filtro.parametro.nome}={atual})"
+
+
+def aplicar_pipeline_filtros(
+    imagem: np.ndarray,
+    etapas: list[EtapaFiltro] | tuple[EtapaFiltro, ...],
+) -> np.ndarray:
+    """Aplica múltiplos filtros em sequência (cada filtro sobre o resultado anterior)."""
+    resultado = imagem
+    for etapa in etapas:
+        resultado = aplicar_filtro(etapa.id_filtro, resultado, etapa.valor)
+    return resultado
+
+
 def proximo_filtro(id_atual: str | None) -> str:
     """Devolve o próximo `id` do ciclo, incluindo o estado `"nenhum"`.
 
